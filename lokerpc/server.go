@@ -1,6 +1,7 @@
 package lokerpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/go-kit/kit/endpoint"
 	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -84,7 +86,9 @@ func NewServer(serviceName string, ecm EndpointCodecMap, logger log.Logger) http
 	}
 
 	for methodName, ec := range ecm {
-		mux.HandleFunc("/"+methodName, makeHandler(logger, ec))
+		l := log.With(logger, "rpc_service", serviceName, "method", methodName)
+
+		mux.HandleFunc("/"+methodName, makeHandler(l, ec))
 		meta.Interfaces = append(meta.Interfaces, endpointMeta{
 			MethodName:    methodName,
 			MethodTimeout: 60000,
@@ -93,13 +97,28 @@ func NewServer(serviceName string, ecm EndpointCodecMap, logger log.Logger) http
 		})
 	}
 
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewEncoder(w).Encode(meta); err != nil {
-			panic(err)
+	// encode the metadata to json
+	var metab []byte
+	{
+		b := &bytes.Buffer{}
+		json.NewEncoder(b).Encode(meta)
+		metab = b.Bytes()
+	}
+
+	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/", "":
+			if r.Method == "GET" {
+				if _, err := rw.Write(metab); err != nil {
+					panic(err)
+				}
+			} else {
+				http.Error(rw, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+		default:
+			mux.ServeHTTP(rw, r)
 		}
 	})
-
-	return mux
 }
 
 func FieldNames(i interface{}) []string {
@@ -160,6 +179,7 @@ func wrapEndpoint(handlerName string, e endpoint.Endpoint) endpoint.Endpoint {
 }
 
 func makeHandler(logger log.Logger, ec EndpointCodec) http.HandlerFunc {
+	logErr := level.Error(logger).Log
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "405 must POST", http.StatusMethodNotAllowed)
@@ -185,20 +205,23 @@ func makeHandler(logger log.Logger, ec EndpointCodec) http.HandlerFunc {
 		// Call the Endpoint with the params
 		result, err := ec.Endpoint(ctx, reqParams)
 		if err != nil {
+			logErr("msg", "endpoint error", "err", err)
 			writeBadReq(w, "Endpoint error: %v", err)
 			return
 		}
 
 		status := http.StatusOK
+		if r, ok := result.(Resulter); ok {
+			result = r.Result()
+		}
+
 		if e, ok := result.(endpoint.Failer); ok && e.Failed() != nil {
+			logErr("err", e.Failed())
+
 			status = http.StatusBadRequest
 			result = struct {
 				Message string `json:"message"`
 			}{e.Failed().Error()}
-		}
-
-		if r, ok := result.(Resulter); ok {
-			result = r.Result()
 		}
 
 		w.Header().Set("Content-Type", ContentType)
