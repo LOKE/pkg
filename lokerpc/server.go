@@ -211,9 +211,6 @@ func makeHandler(logger log.Logger, ec EndpointCodec) http.HandlerFunc {
 		}
 
 		status := http.StatusOK
-		if r, ok := result.(Resulter); ok {
-			result = r.Result()
-		}
 
 		if e, ok := result.(endpoint.Failer); ok && e.Failed() != nil {
 			logErr("err", e.Failed())
@@ -222,6 +219,10 @@ func makeHandler(logger log.Logger, ec EndpointCodec) http.HandlerFunc {
 			result = struct {
 				Message string `json:"message"`
 			}{e.Failed().Error()}
+		} else {
+			if r, ok := result.(Resulter); ok {
+				result = r.Result()
+			}
 		}
 
 		w.Header().Set("Content-Type", ContentType)
