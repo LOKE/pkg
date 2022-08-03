@@ -75,6 +75,45 @@ type endpointMeta struct {
 	Help          string   `json:"help"`
 }
 
+type standardResponse struct {
+	Res any
+	Err error
+}
+
+func (r standardResponse) Result() any   { return r.Res }
+func (r standardResponse) Failed() error { return r.Err }
+
+func DecodeRequest[Req any](_ context.Context, msg json.RawMessage) (any, error) {
+	var req Req
+	err := json.Unmarshal(msg, &req)
+	if err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+
+type StandardMethod[Req any, Res any] func(context.Context, Req) (Res, error)
+
+func MakeStandardEndpoint[Req any, Res any](method StandardMethod[Req, Res]) endpoint.Endpoint {
+	return func(ctx context.Context, request any) (any, error) {
+		req := request.(Req)
+		res, err := method(ctx, req)
+		return standardResponse{res, err}, nil
+	}
+}
+
+// MakeStandardEndpointCodec
+func MakeStandardEndpointCodec[Req any, Res any](method StandardMethod[Req, Res], help string) EndpointCodec {
+	var f Req
+
+	return EndpointCodec{
+		Endpoint:   MakeStandardEndpoint(method),
+		Decode:     DecodeRequest[Req],
+		ParamNames: FieldNames(f),
+		Help:       help,
+	}
+}
+
 // NewServer constructs a new server, which implements http.Handler.
 func NewServer(serviceName string, ecm EndpointCodecMap, logger log.Logger) http.Handler {
 	ecm = wrapMetrics(serviceName, ecm)
