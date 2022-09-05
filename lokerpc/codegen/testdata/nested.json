@@ -1,0 +1,27 @@
+{
+  "serviceName": "nested",
+  "help": "",
+  "multiArg": false,
+  "interfaces": [
+    {
+      "help": "hello1 method",
+      "methodName": "getUser",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": { "properties": { "id": { "type": "string" } } },
+      "responseTypeDef": {
+        "properties": {
+          "name": { "type": "string" },
+          "comments": {
+            "elements": {
+              "properties": {
+                "text": { "type": "string" },
+                "timestamp": { "type": "timestamp" }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

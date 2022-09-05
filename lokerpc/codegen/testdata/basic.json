@@ -1,0 +1,13 @@
+{
+  "serviceName": "service1",
+  "help": "hello",
+  "multiArg": false,
+  "interfaces": [
+    {
+      "help": "hello1 method",
+      "methodName": "hello1",
+      "methodTimeout": 60000,
+      "paramNames": []
+    }
+  ]
+}

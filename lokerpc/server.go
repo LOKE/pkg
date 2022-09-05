@@ -12,6 +12,7 @@ import (
 	"github.com/go-kit/kit/endpoint"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	jtd "github.com/jsontypedef/json-typedef-go"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -61,18 +62,21 @@ type EndpointCodec struct {
 // EndpointCodecMap maps the Request.Method to the proper EndpointCodec
 type EndpointCodecMap map[string]EndpointCodec
 
-type meta struct {
-	ServiceName string         `json:"serviceName"`
-	MultiArg    bool           `json:"multiArg"`
-	Help        string         `json:"help"`
-	Interfaces  []endpointMeta `json:"interfaces"`
+type Meta struct {
+	ServiceName string                `json:"serviceName"`
+	MultiArg    bool                  `json:"multiArg"`
+	Help        string                `json:"help"`
+	Interfaces  []EndpointMeta        `json:"interfaces"`
+	Definitions map[string]jtd.Schema `json:"definitions,omitempty"`
 }
 
-type endpointMeta struct {
-	MethodName    string   `json:"methodName"`
-	ParamNames    []string `json:"paramNames"`
-	MethodTimeout int      `json:"methodTimeout"`
-	Help          string   `json:"help"`
+type EndpointMeta struct {
+	MethodName      string      `json:"methodName"`
+	ParamNames      []string    `json:"paramNames"`
+	MethodTimeout   int         `json:"methodTimeout"`
+	Help            string      `json:"help"`
+	RequestTypeDef  *jtd.Schema `json:"requestTypeDef,omitempty"`
+	ResponseTypeDef *jtd.Schema `json:"responseTypeDef,omitempty"`
 }
 
 type standardResponse struct {
@@ -118,7 +122,7 @@ func MakeStandardEndpointCodec[Req any, Res any](method StandardMethod[Req, Res]
 func NewServer(serviceName string, ecm EndpointCodecMap, logger log.Logger) http.Handler {
 	ecm = wrapMetrics(serviceName, ecm)
 	mux := http.NewServeMux()
-	meta := meta{
+	meta := Meta{
 		ServiceName: serviceName,
 		MultiArg:    false,
 		Help:        "",
@@ -128,7 +132,7 @@ func NewServer(serviceName string, ecm EndpointCodecMap, logger log.Logger) http
 		l := log.With(logger, "rpc_service", serviceName, "method", methodName)
 
 		mux.HandleFunc("/"+methodName, makeHandler(l, ec))
-		meta.Interfaces = append(meta.Interfaces, endpointMeta{
+		meta.Interfaces = append(meta.Interfaces, EndpointMeta{
 			MethodName:    methodName,
 			MethodTimeout: 60000,
 			Help:          ec.Help,
@@ -166,22 +170,21 @@ func FieldNames(i interface{}) []string {
 
 	for n := 0; n < t.NumField(); n++ {
 		f := t.Field(n)
-		name := parseTag(f.Tag.Get("json"))
+		name, _ := parseTag(f.Tag.Get("json"))
 		if name == "" {
 			name = f.Name
 		}
 		pm = append(pm, name)
 	}
 	return pm
-
 }
 
 // Taken from encoding/json/tags.go
-func parseTag(tag string) string {
+func parseTag(tag string) (string, bool) {
 	if idx := strings.Index(tag, ","); idx != -1 {
-		return tag[:idx]
+		return tag[:idx], tag[idx+1:] == "omitempty"
 	}
-	return tag
+	return tag, false
 }
 
 func wrapMetrics(serviceName string, ecm EndpointCodecMap) EndpointCodecMap {
