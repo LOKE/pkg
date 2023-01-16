@@ -51,12 +51,32 @@ type Resulter interface {
 	Result() interface{}
 }
 
+// Service
+type Service struct {
+	Name string
+	Help string
+
+	endpointCodecs EndpointCodecMap
+}
+
+// NewService creates a new Service
+func NewService(name, help string, ecm EndpointCodecMap) *Service {
+	return &Service{
+		Name:           name,
+		Help:           help,
+		endpointCodecs: ecm,
+	}
+}
+
 // EndpointCodec defines a server Endpoint and its associated codecs
 type EndpointCodec struct {
 	Endpoint   endpoint.Endpoint
 	Decode     DecodeRequestFunc
 	Help       string
 	ParamNames []string
+
+	requestType  reflect.Type
+	responseType reflect.Type
 }
 
 // EndpointCodecMap maps the Request.Method to the proper EndpointCodec
@@ -77,6 +97,10 @@ type EndpointMeta struct {
 	Help            string      `json:"help"`
 	RequestTypeDef  *jtd.Schema `json:"requestTypeDef,omitempty"`
 	ResponseTypeDef *jtd.Schema `json:"responseTypeDef,omitempty"`
+}
+
+type RootMeta struct {
+	Services []*Meta `json:"services"`
 }
 
 type standardResponse struct {
@@ -108,17 +132,23 @@ func MakeStandardEndpoint[Req any, Res any](method StandardMethod[Req, Res]) end
 
 // MakeStandardEndpointCodec
 func MakeStandardEndpointCodec[Req any, Res any](method StandardMethod[Req, Res], help string) EndpointCodec {
-	var f Req
+	var req Req
+	var res Res
 
 	return EndpointCodec{
 		Endpoint:   MakeStandardEndpoint(method),
 		Decode:     DecodeRequest[Req],
-		ParamNames: FieldNames(f),
+		ParamNames: FieldNames(req),
 		Help:       help,
+
+		requestType:  reflect.TypeOf(req),
+		responseType: reflect.TypeOf(res),
 	}
 }
 
 // NewServer constructs a new server, which implements http.Handler.
+//
+// Deprecated: Use the MountHandlers with Services instead
 func NewServer(serviceName string, ecm EndpointCodecMap, logger log.Logger) http.Handler {
 	ecm = wrapMetrics(serviceName, ecm)
 	mux := http.NewServeMux()
@@ -162,6 +192,78 @@ func NewServer(serviceName string, ecm EndpointCodecMap, logger log.Logger) http
 			mux.ServeHTTP(rw, r)
 		}
 	})
+}
+
+type Mux interface {
+	Handle(pattern string, handler http.Handler)
+}
+
+// MountHandlers mounts all the service endpoints onto the mux
+// Endpoints are mounted at
+//
+//	POST /rpc/<service>/<method>
+//
+// Meta data is serviced from
+//
+//	GET /rpc
+//	GET /rpc/<service>
+func MountHandlers(logger log.Logger, mux Mux, services ...*Service) {
+	rootmeta := RootMeta{}
+
+	for _, service := range services {
+		ecm := wrapMetrics(service.Name, service.endpointCodecs)
+
+		defs := map[string]jtd.Schema{}
+
+		meta := &Meta{
+			ServiceName: service.Name,
+			MultiArg:    false,
+			Help:        service.Help,
+			Definitions: defs,
+		}
+
+		for methodName, ec := range ecm {
+			l := log.With(logger, "rpc_service", service.Name, "method", methodName)
+
+			mux.Handle("/rpc/"+service.Name+"/"+methodName, makeHandler(l, ec))
+
+			endMeta := EndpointMeta{
+				MethodName:    methodName,
+				MethodTimeout: 60000,
+				Help:          ec.Help,
+				ParamNames:    ec.ParamNames,
+			}
+
+			if ec.requestType != nil {
+				endMeta.RequestTypeDef = TypeSchema(ec.requestType, defs)
+			}
+			if ec.responseType != nil {
+				endMeta.ResponseTypeDef = TypeSchema(ec.responseType, defs)
+			}
+
+			meta.Interfaces = append(meta.Interfaces, endMeta)
+		}
+
+		// service meta endpoint
+		mux.Handle("/rpc/"+service.Name, newMetaHandler(meta))
+
+		rootmeta.Services = append(rootmeta.Services, meta)
+	}
+
+	// root meta endpoint
+	mux.Handle("/rpc", newMetaHandler(rootmeta))
+}
+
+func newMetaHandler(meta any) http.HandlerFunc {
+	return func(rw http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			if err := json.NewEncoder(rw).Encode(meta); err != nil {
+				panic(err)
+			}
+		} else {
+			http.Error(rw, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	}
 }
 
 func FieldNames(i interface{}) []string {
@@ -222,6 +324,7 @@ func wrapEndpoint(handlerName string, e endpoint.Endpoint) endpoint.Endpoint {
 
 func makeHandler(logger log.Logger, ec EndpointCodec) http.HandlerFunc {
 	logErr := level.Error(logger).Log
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "405 must POST", http.StatusMethodNotAllowed)
