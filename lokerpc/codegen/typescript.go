@@ -3,7 +3,9 @@ package codegen
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
+	"strings"
 
 	"github.com/LOKE/pkg/lokerpc"
 	jtd "github.com/jsontypedef/json-typedef-go"
@@ -77,21 +79,24 @@ func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
 
 	for k, v := range meta.Definitions {
 		b.WriteString("\n")
-		b.WriteString("export type " + capitalize(k) + " = " + GenTypescriptType(v) + ";\n")
+		fmt.Fprintf(b, "export type %s = %s;\n", capitalize(k), GenTypescriptType(v))
 	}
 
 	for _, v := range meta.Interfaces {
 		if v.RequestTypeDef != nil {
 			b.WriteString("\n")
-			b.WriteString("export type " + capitalize(v.MethodName) + "Request = " + GenTypescriptType(*v.RequestTypeDef) + ";\n")
+			fmt.Fprintf(b, "export type %sRequest = %s;\n", capitalize(v.MethodName), GenTypescriptType(*v.RequestTypeDef))
+
 		}
 		if v.ResponseTypeDef != nil {
 			b.WriteString("\n")
-			b.WriteString("export type " + capitalize(v.MethodName) + "Response = " + GenTypescriptType(*v.ResponseTypeDef) + ";\n")
+			fmt.Fprintf(b, "export type %sResponse = %s;\n", capitalize(v.MethodName), GenTypescriptType(*v.ResponseTypeDef))
+
 		}
 	}
 
 	b.WriteString("\n")
+	tsDocComment(b, meta.Help, "")
 	b.WriteString("export class " + capitalize(meta.ServiceName) + "Service extends RPCClient {\n")
 	b.WriteString("  constructor(baseUrl: string) {\n")
 	b.WriteString("    super(baseUrl, \"" + meta.ServiceName + "\")\n")
@@ -109,6 +114,7 @@ func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
 			resType = capitalize(v.MethodName) + "Response"
 		}
 
+		tsDocComment(b, v.Help, "  ")
 		b.WriteString("  " + v.MethodName + "(req: " + reqType + "): Promise<" + resType + "> {\n")
 		b.WriteString("    return this.request(\"" + v.MethodName + "\", req);\n  }\n")
 	}
@@ -116,4 +122,14 @@ func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
 	b.WriteString("}\n")
 
 	return b.Flush()
+}
+
+func tsDocComment(w io.Writer, text string, indent string) {
+	lines := strings.Split(text, "\n")
+
+	fmt.Fprintf(w, "%s/**\n", indent)
+	for _, l := range lines {
+		fmt.Fprintf(w, "%s * %s\n", indent, l)
+	}
+	fmt.Fprintf(w, "%s */\n", indent)
 }
