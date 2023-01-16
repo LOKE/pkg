@@ -236,6 +236,7 @@ func MountHandlers(logger log.Logger, mux Mux, services ...*Service) {
 
 			if ec.requestType != nil {
 				endMeta.RequestTypeDef = TypeSchema(ec.requestType, defs)
+				endMeta.RequestTypeDef.Nullable = false
 			}
 			if ec.responseType != nil {
 				endMeta.ResponseTypeDef = TypeSchema(ec.responseType, defs)
@@ -295,10 +296,12 @@ func wrapMetrics(serviceName string, ecm EndpointCodecMap) EndpointCodecMap {
 	for methodName, ec := range ecm {
 		handlerName := serviceName + "." + methodName
 		newECM[methodName] = EndpointCodec{
-			Endpoint:   wrapEndpoint(handlerName, ec.Endpoint),
-			Decode:     ec.Decode,
-			Help:       ec.Help,
-			ParamNames: ec.ParamNames,
+			Endpoint:     wrapEndpoint(handlerName, ec.Endpoint),
+			Decode:       ec.Decode,
+			Help:         ec.Help,
+			ParamNames:   ec.ParamNames,
+			requestType:  ec.requestType,
+			responseType: ec.responseType,
 		}
 	}
 
