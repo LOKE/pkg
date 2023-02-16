@@ -58,6 +58,7 @@ func TypeSchema(t reflect.Type, defs map[string]jtd.Schema) *jtd.Schema {
 	case reflect.Slice:
 		elems := TypeSchema(t.Elem(), defs)
 		schema.Elements = elems
+		schema.Nullable = true
 	case reflect.Map:
 		vals := TypeSchema(t.Elem(), defs)
 		schema.Values = vals
