@@ -40,11 +40,11 @@ func GenTypescriptType(schema jtd.Schema) string {
 		t += "Record<string, " + GenTypescriptType(*schema.Values) + ">"
 	case jtd.FormProperties:
 		t += "{\n"
-		for k, v := range schema.Properties {
-			t += "  " + k + ": " + GenTypescriptType(v) + ";\n"
+		for _, k := range sortedKeys(schema.Properties) {
+			t += "  " + k + ": " + GenTypescriptType(schema.Properties[k]) + ";\n"
 		}
-		for k, v := range schema.OptionalProperties {
-			t += "  " + k + "?: " + GenTypescriptType(v) + ";\n"
+		for _, k := range sortedKeys(schema.OptionalProperties) {
+			t += "  " + k + "?: " + GenTypescriptType(schema.OptionalProperties[k]) + ";\n"
 		}
 		t += "}"
 	case jtd.FormDiscriminator:
@@ -77,9 +77,9 @@ func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
 
 	b.WriteString("import { RPCClient } from \"@loke/http-rpc-client\";\n")
 
-	for k, v := range meta.Definitions {
+	for _, k := range sortedKeys(meta.Definitions) {
 		b.WriteString("\n")
-		fmt.Fprintf(b, "export type %s = %s;\n", capitalize(k), GenTypescriptType(v))
+		fmt.Fprintf(b, "export type %s = %s;\n", capitalize(k), GenTypescriptType(meta.Definitions[k]))
 	}
 
 	for _, v := range meta.Interfaces {

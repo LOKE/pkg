@@ -2,7 +2,6 @@ package lokerpc
 
 import (
 	"reflect"
-	"strings"
 	"time"
 
 	jtd "github.com/jsontypedef/json-typedef-go"
@@ -97,11 +96,4 @@ func TypeSchema(t reflect.Type, defs map[string]jtd.Schema) *jtd.Schema {
 	}
 
 	return &schema
-}
-
-func capitalize(s string) string {
-	if len(s) == 0 {
-		return s
-	}
-	return strings.ToUpper(s[:1]) + s[1:]
 }
