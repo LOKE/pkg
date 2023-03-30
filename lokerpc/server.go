@@ -75,8 +75,9 @@ type EndpointCodec struct {
 	Help       string
 	ParamNames []string
 
-	requestType  reflect.Type
-	responseType reflect.Type
+	requestType      reflect.Type
+	responseType     reflect.Type
+	errOnNilResponse bool
 }
 
 // EndpointCodecMap maps the Request.Method to the proper EndpointCodec
@@ -130,8 +131,10 @@ func MakeStandardEndpoint[Req any, Res any](method StandardMethod[Req, Res]) end
 	}
 }
 
+type EndpointCodecOption func(*EndpointCodec)
+
 // MakeStandardEndpointCodec
-func MakeStandardEndpointCodec[Req any, Res any](method StandardMethod[Req, Res], help string) EndpointCodec {
+func MakeStandardEndpointCodec[Req any, Res any](method StandardMethod[Req, Res], help string, opts ...EndpointCodecOption) EndpointCodec {
 	var req Req
 	var res Res
 
@@ -143,6 +146,12 @@ func MakeStandardEndpointCodec[Req any, Res any](method StandardMethod[Req, Res]
 
 		requestType:  reflect.TypeOf(req),
 		responseType: reflect.TypeOf(res),
+	}
+}
+
+func NoNilResponse() EndpointCodecOption {
+	return func(ec *EndpointCodec) {
+		ec.errOnNilResponse = true
 	}
 }
 
@@ -240,6 +249,9 @@ func MountHandlers(logger log.Logger, mux Mux, services ...*Service) {
 			}
 			if ec.responseType != nil {
 				endMeta.ResponseTypeDef = TypeSchema(ec.responseType, defs)
+				if ec.errOnNilResponse {
+					endMeta.ResponseTypeDef.Nullable = false
+				}
 			}
 
 			meta.Interfaces = append(meta.Interfaces, endMeta)
@@ -370,6 +382,15 @@ func makeHandler(logger log.Logger, ec EndpointCodec) http.HandlerFunc {
 		} else {
 			if r, ok := result.(Resulter); ok {
 				result = r.Result()
+			}
+
+			if result == nil && ec.errOnNilResponse {
+				logErr("err", "unexpected nil response")
+
+				status = http.StatusInternalServerError
+				result = struct {
+					Message string `json:"message"`
+				}{"unexpected nil response"}
 			}
 		}
 
