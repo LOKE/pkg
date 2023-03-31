@@ -83,15 +83,14 @@ func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
 	}
 
 	for _, v := range meta.Interfaces {
-		if v.RequestTypeDef != nil {
+		if v.RequestTypeDef != nil && v.RequestTypeDef.Ref == nil {
 			b.WriteString("\n")
 			fmt.Fprintf(b, "export type %sRequest = %s;\n", capitalize(v.MethodName), GenTypescriptType(*v.RequestTypeDef))
-
 		}
-		if v.ResponseTypeDef != nil {
+
+		if v.ResponseTypeDef != nil && v.ResponseTypeDef.Ref == nil {
 			b.WriteString("\n")
 			fmt.Fprintf(b, "export type %sResponse = %s;\n", capitalize(v.MethodName), GenTypescriptType(*v.ResponseTypeDef))
-
 		}
 	}
 
@@ -105,13 +104,20 @@ func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
 	for _, v := range meta.Interfaces {
 		reqType := "any"
 		if v.RequestTypeDef != nil {
-			reqType = capitalize(v.MethodName) + "Request"
-
+			if v.RequestTypeDef.Ref == nil {
+				reqType = capitalize(v.MethodName) + "Request"
+			} else {
+				reqType = GenTypescriptType(*v.RequestTypeDef)
+			}
 		}
 
 		resType := "any"
 		if v.ResponseTypeDef != nil {
-			resType = capitalize(v.MethodName) + "Response"
+			if v.ResponseTypeDef.Ref == nil {
+				reqType = capitalize(v.MethodName) + "Response"
+			} else {
+				reqType = GenTypescriptType(*v.ResponseTypeDef)
+			}
 		}
 
 		tsDocComment(b, v.Help, "  ")
