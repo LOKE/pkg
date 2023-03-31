@@ -144,7 +144,7 @@ func MakeStandardEndpointCodec[Req any, Res any](method StandardMethod[Req, Res]
 	var req Req
 	var res Res
 
-	return EndpointCodec{
+	ec := EndpointCodec{
 		Endpoint:   MakeStandardEndpoint(method),
 		Decode:     DecodeRequest[Req],
 		ParamNames: FieldNames(req),
@@ -153,6 +153,12 @@ func MakeStandardEndpointCodec[Req any, Res any](method StandardMethod[Req, Res]
 		requestType:  reflect.TypeOf(req),
 		responseType: reflect.TypeOf(res),
 	}
+
+	for _, opt := range opts {
+		opt(&ec)
+	}
+
+	return ec
 }
 
 func NoNilResponse() EndpointCodecOption {
