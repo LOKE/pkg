@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/go-kit/kit/endpoint"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	jtd "github.com/jsontypedef/json-typedef-go"
@@ -51,6 +50,10 @@ type Resulter interface {
 	Result() interface{}
 }
 
+type Failer interface {
+	Failed() error
+}
+
 // Service
 type Service struct {
 	Name string
@@ -68,9 +71,12 @@ func NewService(name, help string, ecm EndpointCodecMap) *Service {
 	}
 }
 
+// Endpoint is an abstract rpc endpoint
+type Endpoint func(ctx context.Context, request interface{}) (response interface{}, err error)
+
 // EndpointCodec defines a server Endpoint and its associated codecs
 type EndpointCodec struct {
-	Endpoint   endpoint.Endpoint
+	Endpoint   Endpoint
 	Decode     DecodeRequestFunc
 	Help       string
 	ParamNames []string
@@ -123,7 +129,7 @@ func DecodeRequest[Req any](_ context.Context, msg json.RawMessage) (any, error)
 
 type StandardMethod[Req any, Res any] func(context.Context, Req) (Res, error)
 
-func MakeStandardEndpoint[Req any, Res any](method StandardMethod[Req, Res]) endpoint.Endpoint {
+func MakeStandardEndpoint[Req any, Res any](method StandardMethod[Req, Res]) Endpoint {
 	return func(ctx context.Context, request any) (any, error) {
 		req := request.(Req)
 		res, err := method(ctx, req)
@@ -307,20 +313,17 @@ func wrapMetrics(serviceName string, ecm EndpointCodecMap) EndpointCodecMap {
 
 	for methodName, ec := range ecm {
 		handlerName := serviceName + "." + methodName
-		newECM[methodName] = EndpointCodec{
-			Endpoint:     wrapEndpoint(handlerName, ec.Endpoint),
-			Decode:       ec.Decode,
-			Help:         ec.Help,
-			ParamNames:   ec.ParamNames,
-			requestType:  ec.requestType,
-			responseType: ec.responseType,
-		}
+
+		wec := ec
+		wec.Endpoint = wrapEndpoint(handlerName, ec.Endpoint)
+
+		newECM[methodName] = wec
 	}
 
 	return newECM
 }
 
-func wrapEndpoint(handlerName string, e endpoint.Endpoint) endpoint.Endpoint {
+func wrapEndpoint(handlerName string, e Endpoint) Endpoint {
 	c := count.WithLabelValues(handlerName)
 	l := latency.WithLabelValues(handlerName)
 
@@ -372,7 +375,7 @@ func makeHandler(logger log.Logger, ec EndpointCodec) http.HandlerFunc {
 
 		status := http.StatusOK
 
-		if e, ok := result.(endpoint.Failer); ok && e.Failed() != nil {
+		if e, ok := result.(Failer); ok && e.Failed() != nil {
 			logErr("err", e.Failed())
 
 			status = http.StatusBadRequest

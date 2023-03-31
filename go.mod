@@ -3,7 +3,6 @@ module github.com/LOKE/pkg
 go 1.18
 
 require (
-	github.com/go-kit/kit v0.12.0
 	github.com/go-kit/log v0.2.1
 	github.com/google/go-cmp v0.5.8
 	github.com/jsontypedef/json-typedef-go v0.0.0-20200503043955-4280071bd745
