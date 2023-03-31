@@ -114,9 +114,9 @@ func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
 		resType := "any"
 		if v.ResponseTypeDef != nil {
 			if v.ResponseTypeDef.Ref == nil {
-				reqType = capitalize(v.MethodName) + "Response"
+				resType = capitalize(v.MethodName) + "Response"
 			} else {
-				reqType = GenTypescriptType(*v.ResponseTypeDef)
+				resType = GenTypescriptType(*v.ResponseTypeDef)
 			}
 		}
 
