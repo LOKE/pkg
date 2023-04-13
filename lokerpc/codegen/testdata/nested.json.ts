@@ -1,28 +1,29 @@
-import { RPCClient } from "@loke/http-rpc-client";
+import { RPCContextClient } from "@loke/http-rpc-client";
+import { Context } from "@loke/context";
 
 export type GetUserRequest = {
   id: string;
 };
 
 export type GetUserResponse = {
-  name: string;
   comments: {
   text: string;
   timestamp: string;
 }[];
+  name: string;
 };
 
 /**
  * 
  */
-export class NestedService extends RPCClient {
+export class NestedService extends RPCContextClient {
   constructor(baseUrl: string) {
     super(baseUrl, "nested")
   }
   /**
    * hello1 method
    */
-  getUser(req: GetUserRequest): Promise<GetUserResponse> {
-    return this.request("getUser", req);
+  getUser(ctx: Context, req: GetUserRequest): Promise<GetUserResponse> {
+    return this.request(ctx, "getUser", req);
   }
 }

@@ -75,7 +75,8 @@ func GenTypescriptType(schema jtd.Schema) string {
 func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
 	b := bufio.NewWriter(w)
 
-	b.WriteString("import { RPCClient } from \"@loke/http-rpc-client\";\n")
+	b.WriteString("import { RPCContextClient } from \"@loke/http-rpc-client\";\n")
+	b.WriteString("import { Context } from \"@loke/context\";\n")
 
 	for _, k := range sortedKeys(meta.Definitions) {
 		b.WriteString("\n")
@@ -96,7 +97,7 @@ func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
 
 	b.WriteString("\n")
 	tsDocComment(b, meta.Help, "")
-	b.WriteString("export class " + capitalize(meta.ServiceName) + "Service extends RPCClient {\n")
+	b.WriteString("export class " + capitalize(meta.ServiceName) + "Service extends RPCContextClient {\n")
 	b.WriteString("  constructor(baseUrl: string) {\n")
 	b.WriteString("    super(baseUrl, \"" + meta.ServiceName + "\")\n")
 	b.WriteString("  }\n")
@@ -121,8 +122,8 @@ func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
 		}
 
 		tsDocComment(b, v.Help, "  ")
-		b.WriteString("  " + v.MethodName + "(req: " + reqType + "): Promise<" + resType + "> {\n")
-		b.WriteString("    return this.request(\"" + v.MethodName + "\", req);\n  }\n")
+		b.WriteString("  " + v.MethodName + "(ctx: Context, req: " + reqType + "): Promise<" + resType + "> {\n")
+		b.WriteString("    return this.request(ctx, \"" + v.MethodName + "\", req);\n  }\n")
 	}
 
 	b.WriteString("}\n")

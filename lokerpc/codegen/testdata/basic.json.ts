@@ -1,16 +1,17 @@
-import { RPCClient } from "@loke/http-rpc-client";
+import { RPCContextClient } from "@loke/http-rpc-client";
+import { Context } from "@loke/context";
 
 /**
  * hello
  */
-export class Service1Service extends RPCClient {
+export class Service1Service extends RPCContextClient {
   constructor(baseUrl: string) {
     super(baseUrl, "service1")
   }
   /**
    * hello1 method
    */
-  hello1(req: any): Promise<any> {
-    return this.request("hello1", req);
+  hello1(ctx: Context, req: any): Promise<any> {
+    return this.request(ctx, "hello1", req);
   }
 }
