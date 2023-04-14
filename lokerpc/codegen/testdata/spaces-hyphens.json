@@ -1,0 +1,38 @@
+{
+  "serviceName": "hyphenated-service-name",
+  "help": "",
+  "multiArg": false,
+  "definitions": {
+    "User": {
+      "properties": {
+        "User ID": {
+          "type": "string"
+        },
+        "First Name": {
+          "type": "string"
+        },
+        "Last Name": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "interfaces": [
+    {
+      "help": "hello1 method",
+      "methodName": "getUser",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": {
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        }
+      },
+      "responseTypeDef": {
+        "ref": "User"
+      }
+    }
+  ]
+}
