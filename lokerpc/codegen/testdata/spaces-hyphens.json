@@ -5,13 +5,16 @@
   "definitions": {
     "User": {
       "properties": {
-        "User ID": {
+        "User_ID": {
           "type": "string"
         },
-        "First Name": {
+        "First-Name": {
           "type": "string"
         },
         "Last Name": {
+          "type": "string"
+        },
+        "Email@Address": {
           "type": "string"
         }
       }

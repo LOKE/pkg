@@ -2,9 +2,10 @@ import { RPCContextClient } from "@loke/http-rpc-client";
 import { Context } from "@loke/context";
 
 export type User = {
-  "First Name": string;
+  "Email@Address": string;
+  "First-Name": string;
   "Last Name": string;
-  "User ID": string;
+  "User_ID": string;
 };
 
 export type GetUserRequest = {

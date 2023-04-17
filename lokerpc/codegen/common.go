@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -30,9 +31,11 @@ func sortedKeys[T any](m map[string]T) []string {
 	return keys
 }
 
-func quoteSpaces(s string) string {
-	if strings.Contains(s, " ") {
-		return fmt.Sprintf("%q", s)
+var notRequireQuotes = regexp.MustCompile(`^[a-z_$][a-z0-9_$]*$`)
+
+func quoteFieldNames(s string) string {
+	if notRequireQuotes.MatchString(s) {
+		return s
 	}
-	return s
+	return fmt.Sprintf("%q", s)
 }

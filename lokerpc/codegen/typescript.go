@@ -41,7 +41,7 @@ func GenTypescriptType(schema jtd.Schema) string {
 	case jtd.FormProperties:
 		t += "{\n"
 		for _, k := range sortedKeys(schema.Properties) {
-			t += "  " + quoteSpaces(k) + ": " + GenTypescriptType(schema.Properties[k]) + ";\n"
+			t += "  " + quoteFieldNames(k) + ": " + GenTypescriptType(schema.Properties[k]) + ";\n"
 		}
 		for _, k := range sortedKeys(schema.OptionalProperties) {
 			t += "  " + k + "?: " + GenTypescriptType(schema.OptionalProperties[k]) + ";\n"
