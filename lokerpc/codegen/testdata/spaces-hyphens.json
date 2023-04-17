@@ -1,0 +1,86 @@
+{
+  "serviceName": "hyphenated-service-name",
+  "help": "",
+  "multiArg": false,
+  "definitions": {
+    "User": {
+      "properties": {
+        "snake_case": {
+          "type": "string"
+        },
+        "Snake_Case": {
+          "type": "string"
+        },
+        "kebab-case": {
+          "type": "string"
+        },
+        "Kebab-Case": {
+          "type": "string"
+        },
+        "camelCase": {
+          "type": "string"
+        },
+        "lowercase": {
+          "type": "string"
+        },
+        "PascalCase": {
+          "type": "string"
+        },
+        "dot.separated": {
+          "type": "string"
+        },
+        "comma,separated": {
+          "type": "string"
+        },
+        "semicolonsuffixed;": {
+          "type": "string"
+        },
+        "email@address": {
+          "type": "string"
+        },
+        "@prefixed": {
+          "type": "string"
+        },
+        "#prefixed": {
+          "type": "string"
+        },
+        "$prefixed": {
+          "type": "string"
+        },
+        ".prefixed": {
+          "type": "string"
+        },
+        "1numberedStart": {
+          "type": "string"
+        },
+        "numberedEnd1": {
+          "type": "string"
+        },
+        "\"DoubleQuotes\"": {
+          "type": "string"
+        },
+        "'SingleQuotes'": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "interfaces": [
+    {
+      "help": "hello1 method",
+      "methodName": "getUser",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": {
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        }
+      },
+      "responseTypeDef": {
+        "ref": "User"
+      }
+    }
+  ]
+}

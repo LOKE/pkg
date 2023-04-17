@@ -41,7 +41,7 @@ func GenTypescriptType(schema jtd.Schema) string {
 	case jtd.FormProperties:
 		t += "{\n"
 		for _, k := range sortedKeys(schema.Properties) {
-			t += "  " + k + ": " + GenTypescriptType(schema.Properties[k]) + ";\n"
+			t += "  " + quoteFieldNames(k) + ": " + GenTypescriptType(schema.Properties[k]) + ";\n"
 		}
 		for _, k := range sortedKeys(schema.OptionalProperties) {
 			t += "  " + k + "?: " + GenTypescriptType(schema.OptionalProperties[k]) + ";\n"
@@ -97,7 +97,7 @@ func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
 
 	b.WriteString("\n")
 	tsDocComment(b, meta.Help, "")
-	b.WriteString("export class " + capitalize(meta.ServiceName) + "Service extends RPCContextClient {\n")
+	b.WriteString("export class " + pascalCase(meta.ServiceName) + "Service extends RPCContextClient {\n")
 	b.WriteString("  constructor(baseUrl: string) {\n")
 	b.WriteString("    super(baseUrl, \"" + meta.ServiceName + "\")\n")
 	b.WriteString("  }\n")
