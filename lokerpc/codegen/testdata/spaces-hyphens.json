@@ -5,16 +5,61 @@
   "definitions": {
     "User": {
       "properties": {
-        "User_ID": {
+        "snake_case": {
           "type": "string"
         },
-        "First-Name": {
+        "Snake_Case": {
           "type": "string"
         },
-        "Last Name": {
+        "kebab-case": {
           "type": "string"
         },
-        "Email@Address": {
+        "Kebab-Case": {
+          "type": "string"
+        },
+        "camelCase": {
+          "type": "string"
+        },
+        "lowercase": {
+          "type": "string"
+        },
+        "PascalCase": {
+          "type": "string"
+        },
+        "dot.separated": {
+          "type": "string"
+        },
+        "comma,separated": {
+          "type": "string"
+        },
+        "semicolonsuffixed;": {
+          "type": "string"
+        },
+        "email@address": {
+          "type": "string"
+        },
+        "@prefixed": {
+          "type": "string"
+        },
+        "#prefixed": {
+          "type": "string"
+        },
+        "$prefixed": {
+          "type": "string"
+        },
+        ".prefixed": {
+          "type": "string"
+        },
+        "1numberedStart": {
+          "type": "string"
+        },
+        "numberedEnd1": {
+          "type": "string"
+        },
+        "\"DoubleQuotes\"": {
+          "type": "string"
+        },
+        "'SingleQuotes'": {
           "type": "string"
         }
       }

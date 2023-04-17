@@ -31,7 +31,7 @@ func sortedKeys[T any](m map[string]T) []string {
 	return keys
 }
 
-var notRequireQuotes = regexp.MustCompile(`^[a-z_$][a-z0-9_$]*$`)
+var notRequireQuotes = regexp.MustCompile(`(?i)^[a-z_$][a-z0-9_$]*$`)
 
 func quoteFieldNames(s string) string {
 	if notRequireQuotes.MatchString(s) {
