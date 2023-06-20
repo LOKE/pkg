@@ -35,7 +35,11 @@ func GenTypescriptType(schema jtd.Schema) string {
 			t += "boolean"
 		}
 	case jtd.FormElements:
-		t += GenTypescriptType(*schema.Elements) + "[]"
+		if schema.Elements.Nullable {
+			t += "(" + GenTypescriptType(*schema.Elements) + ")[]"
+		} else {
+			t += GenTypescriptType(*schema.Elements) + "[]"
+		}
 	case jtd.FormValues:
 		t += "Record<string, " + GenTypescriptType(*schema.Values) + ">"
 	case jtd.FormProperties:
