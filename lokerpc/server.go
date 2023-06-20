@@ -282,6 +282,8 @@ func MountHandlers(logger log.Logger, mux Mux, services ...*Service) {
 func newMetaHandler(meta any) http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
+			rw.Header().Set("Content-Type", ContentType)
+			rw.WriteHeader(http.StatusOK)
 			if err := json.NewEncoder(rw).Encode(meta); err != nil {
 				panic(err)
 			}

@@ -17,7 +17,8 @@
               "properties": {
                 "text": { "type": "string" },
                 "timestamp": { "type": "timestamp" }
-              }
+              },
+              "nullable": true
             }
           }
         }
