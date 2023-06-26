@@ -300,6 +300,9 @@ func FieldNames(i interface{}) []string {
 	for n := 0; n < t.NumField(); n++ {
 		f := t.Field(n)
 		name, _ := parseTag(f.Tag.Get("json"))
+		if name == "-" {
+			continue
+		}
 		if name == "" {
 			name = f.Name
 		}
