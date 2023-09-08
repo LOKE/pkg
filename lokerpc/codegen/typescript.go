@@ -52,7 +52,16 @@ func GenTypescriptType(schema jtd.Schema) string {
 		}
 		t += "}"
 	case jtd.FormDiscriminator:
-		panic("discriminator not supported")
+		for _, k := range sortedKeys(schema.Mapping) {
+			s := schema.Mapping[k]
+			s.Properties = map[string]jtd.Schema{}
+			for kk, v := range schema.Mapping[k].Properties {
+				s.Properties[kk] = v
+			}
+			s.Properties[schema.Discriminator] = jtd.Schema{Enum: []string{k}}
+
+			t += "\n| " + GenTypescriptType(s)
+		}
 	case jtd.FormEnum:
 		for i, v := range schema.Enum {
 			if i > 0 {
@@ -118,7 +127,9 @@ func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
 
 		resType := "any"
 		if v.ResponseTypeDef != nil {
-			if v.ResponseTypeDef.Ref == nil {
+			if v.ResponseTypeDef.Metadata["void"] == true {
+				resType = "void"
+			} else if v.ResponseTypeDef.Ref == nil {
 				resType = capitalize(v.MethodName) + "Response"
 			} else {
 				resType = GenTypescriptType(*v.ResponseTypeDef)

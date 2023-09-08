@@ -1,0 +1,61 @@
+{
+  "serviceName": "service1",
+  "help": "hello",
+  "multiArg": false,
+  "interfaces": [
+    {
+      "help": "hello1 method",
+      "methodName": "hello1",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": {
+        "properties": {
+          "thing": {
+            "discriminator": "eventType",
+            "mapping": {
+              "USER_CREATED": {
+                "properties": {
+                  "id": { "type": "string" }
+                }
+              },
+              "USER_PAYMENT_PLAN_CHANGED": {
+                "properties": {
+                  "id": { "type": "string" },
+                  "plan": { "enum": ["FREE", "PAID"] }
+                }
+              },
+              "USER_DELETED": {
+                "properties": {
+                  "id": { "type": "string" },
+                  "softDelete": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "responseTypeDef": {
+        "discriminator": "eventType",
+        "mapping": {
+          "USER_CREATED": {
+            "properties": {
+              "id": { "type": "string" }
+            }
+          },
+          "USER_PAYMENT_PLAN_CHANGED": {
+            "properties": {
+              "id": { "type": "string" },
+              "plan": { "enum": ["FREE", "PAID"] }
+            }
+          },
+          "USER_DELETED": {
+            "properties": {
+              "id": { "type": "string" },
+              "softDelete": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
