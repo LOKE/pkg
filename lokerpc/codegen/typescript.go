@@ -52,7 +52,16 @@ func GenTypescriptType(schema jtd.Schema) string {
 		}
 		t += "}"
 	case jtd.FormDiscriminator:
-		panic("discriminator not supported")
+		for _, k := range sortedKeys(schema.Mapping) {
+			s := schema.Mapping[k]
+			s.Properties = map[string]jtd.Schema{}
+			for kk, v := range schema.Mapping[k].Properties {
+				s.Properties[kk] = v
+			}
+			s.Properties[schema.Discriminator] = jtd.Schema{Enum: []string{k}}
+
+			t += "\n| " + GenTypescriptType(s)
+		}
 	case jtd.FormEnum:
 		for i, v := range schema.Enum {
 			if i > 0 {
@@ -77,26 +86,16 @@ func GenTypescriptType(schema jtd.Schema) string {
 }
 
 func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
+	defOrder := normalise(&meta)
+
 	b := bufio.NewWriter(w)
 
 	b.WriteString("import { RPCContextClient } from \"@loke/http-rpc-client\";\n")
 	b.WriteString("import { Context } from \"@loke/context\";\n")
 
-	for _, k := range sortedKeys(meta.Definitions) {
+	for _, k := range defOrder {
 		b.WriteString("\n")
 		fmt.Fprintf(b, "export type %s = %s;\n", capitalize(k), GenTypescriptType(meta.Definitions[k]))
-	}
-
-	for _, v := range meta.Interfaces {
-		if v.RequestTypeDef != nil && v.RequestTypeDef.Ref == nil {
-			b.WriteString("\n")
-			fmt.Fprintf(b, "export type %sRequest = %s;\n", capitalize(v.MethodName), GenTypescriptType(*v.RequestTypeDef))
-		}
-
-		if v.ResponseTypeDef != nil && v.ResponseTypeDef.Ref == nil {
-			b.WriteString("\n")
-			fmt.Fprintf(b, "export type %sResponse = %s;\n", capitalize(v.MethodName), GenTypescriptType(*v.ResponseTypeDef))
-		}
 	}
 
 	b.WriteString("\n")
@@ -109,17 +108,13 @@ func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
 	for _, v := range meta.Interfaces {
 		reqType := "any"
 		if v.RequestTypeDef != nil {
-			if v.RequestTypeDef.Ref == nil {
-				reqType = capitalize(v.MethodName) + "Request"
-			} else {
-				reqType = GenTypescriptType(*v.RequestTypeDef)
-			}
+			reqType = GenTypescriptType(*v.RequestTypeDef)
 		}
 
 		resType := "any"
 		if v.ResponseTypeDef != nil {
-			if v.ResponseTypeDef.Ref == nil {
-				resType = capitalize(v.MethodName) + "Response"
+			if v.ResponseTypeDef.Metadata["void"] == true {
+				resType = "void"
 			} else {
 				resType = GenTypescriptType(*v.ResponseTypeDef)
 			}
@@ -133,6 +128,46 @@ func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
 	b.WriteString("}\n")
 
 	return b.Flush()
+}
+
+func normalise(meta *lokerpc.Meta) []string {
+	var defOrder []string
+
+	if meta.Definitions == nil {
+		meta.Definitions = map[string]jtd.Schema{}
+	}
+
+	defOrder = append(defOrder, sortedKeys(meta.Definitions)...)
+
+	for i, v := range meta.Interfaces {
+		if v.RequestTypeDef != nil && v.RequestTypeDef.Ref == nil && v.ResponseTypeDef.Form() != jtd.FormEmpty {
+			name := capitalize(v.MethodName) + "Request"
+			for {
+				if _, ok := meta.Definitions[name]; !ok {
+					break
+				}
+				name += "_"
+			}
+			meta.Definitions[name] = *v.RequestTypeDef
+			meta.Interfaces[i].RequestTypeDef = &jtd.Schema{Ref: &name}
+			defOrder = append(defOrder, name)
+		}
+
+		if v.ResponseTypeDef != nil && v.ResponseTypeDef.Ref == nil && v.ResponseTypeDef.Form() != jtd.FormEmpty {
+			name := capitalize(v.MethodName) + "Response"
+			for {
+				if _, ok := meta.Definitions[name]; !ok {
+					break
+				}
+				name += "_"
+			}
+			meta.Definitions[name] = *v.ResponseTypeDef
+			meta.Interfaces[i].ResponseTypeDef = &jtd.Schema{Ref: &name}
+			defOrder = append(defOrder, name)
+		}
+	}
+
+	return defOrder
 }
 
 func tsDocComment(w io.Writer, text string, indent string) {

@@ -1,0 +1,27 @@
+{
+  "serviceName": "typed",
+  "help": "",
+  "multiArg": false,
+  "definitions": {
+    "GetUserResponse": {
+      "properties": {
+        "name": { "type": "string" }
+      }
+    },
+    "GetUserRequest": {
+      "properties": {
+        "name": { "type": "string" }
+      }
+    }
+  },
+  "interfaces": [
+    {
+      "help": "hello1 method",
+      "methodName": "getUser",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": { "properties": { "id": { "type": "string" } } },
+      "responseTypeDef": { "properties": { "id": { "type": "string" } } }
+    }
+  ]
+}
