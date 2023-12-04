@@ -140,7 +140,7 @@ func normalise(meta *lokerpc.Meta) []string {
 	defOrder = append(defOrder, sortedKeys(meta.Definitions)...)
 
 	for i, v := range meta.Interfaces {
-		if v.RequestTypeDef != nil && v.RequestTypeDef.Ref == nil && v.ResponseTypeDef.Form() != jtd.FormEmpty {
+		if v.RequestTypeDef != nil && v.RequestTypeDef.Ref == nil && v.RequestTypeDef.Form() != jtd.FormEmpty {
 			name := capitalize(v.MethodName) + "Request"
 			for {
 				if _, ok := meta.Definitions[name]; !ok {
