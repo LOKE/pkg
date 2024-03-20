@@ -9,6 +9,18 @@ import (
 	jtd "github.com/jsontypedef/json-typedef-go"
 )
 
+type jsonMarshaler struct{}
+
+func (jsonMarshaler) MarshalJSON() ([]byte, error) {
+	return nil, nil
+}
+
+type textMarshaler struct{}
+
+func (textMarshaler) MarshalText() ([]byte, error) {
+	return nil, nil
+}
+
 func TestTypeSchema(t *testing.T) {
 	type NamedStruct struct {
 		Foo string `json:"foo"`
@@ -155,6 +167,20 @@ func TestTypeSchema(t *testing.T) {
 					}
 				}
 			}`,
+		},
+		{
+			name: "json marshaler",
+			args: args{
+				t: reflect.TypeOf(jsonMarshaler{}),
+			},
+			want: `{}`,
+		},
+		{
+			name: "text marshaler",
+			args: args{
+				t: reflect.TypeOf(textMarshaler{}),
+			},
+			want: `{"type":"string"}`,
 		},
 	}
 	for _, tt := range tests {
