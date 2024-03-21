@@ -176,11 +176,26 @@ func TestTypeSchema(t *testing.T) {
 			want: `{}`,
 		},
 		{
+			name: "json marshaler",
+			args: args{
+				t: reflect.TypeOf(&jsonMarshaler{}),
+			},
+			// Maybe this should just be empty `{}` ?
+			want: `{"nullable": true}`,
+		},
+		{
 			name: "text marshaler",
 			args: args{
 				t: reflect.TypeOf(textMarshaler{}),
 			},
 			want: `{"type":"string"}`,
+		},
+		{
+			name: "text marshaler",
+			args: args{
+				t: reflect.TypeOf(&textMarshaler{}),
+			},
+			want: `{"type":"string","nullable": true}`,
 		},
 	}
 	for _, tt := range tests {
