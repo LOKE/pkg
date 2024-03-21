@@ -18,6 +18,16 @@ func TypeSchema(t reflect.Type, defs map[string]jtd.Schema) *jtd.Schema {
 		case timeType:
 			schema.Type = jtd.TypeTimestamp
 		default:
+			if _, ok := t.MethodByName("MarshalJSON"); ok {
+				// Do nothing, empty schema, any
+				break
+			}
+
+			if _, ok := t.MethodByName("MarshalText"); ok {
+				schema.Type = jtd.TypeString
+				break
+			}
+
 			schema.Properties = make(map[string]jtd.Schema)
 			for i := 0; i < t.NumField(); i++ {
 				f := t.Field(i)
