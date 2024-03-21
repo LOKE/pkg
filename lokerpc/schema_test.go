@@ -43,6 +43,26 @@ func TestTypeSchema(t *testing.T) {
 			want: `{"type":"string"}`,
 		},
 		{
+			name: "slice of strings",
+			args: args{
+				t: reflect.TypeOf([]string{}),
+			},
+			want: `{
+				"elements":{"type":"string"},
+				"nullable": true
+			}`,
+		},
+		{
+			name: "map of ints",
+			args: args{
+				t: reflect.TypeOf(map[string]int32{}),
+			},
+			want: `{
+				"values":{"type":"int32"},
+				"nullable": true
+			}`,
+		},
+		{
 			name: "int 32",
 			args: args{
 				t: reflect.TypeOf(int32(0)),
