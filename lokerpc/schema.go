@@ -1,6 +1,7 @@
 package lokerpc
 
 import (
+	"fmt"
 	"reflect"
 	"time"
 
@@ -9,8 +10,17 @@ import (
 
 var timeType = reflect.TypeOf(time.Time{})
 
-func TypeSchema(t reflect.Type, defs map[string]jtd.Schema) *jtd.Schema {
-	var schema jtd.Schema
+type NamedSchema struct {
+	Name   string
+	Schema jtd.Schema
+}
+
+func TypeSchema(t reflect.Type, tdefs map[reflect.Type]*NamedSchema) *jtd.Schema {
+	if ns, ok := tdefs[t]; ok {
+		return &jtd.Schema{Ref: &ns.Name}
+	}
+
+	schema := jtd.Schema{}
 
 	switch t.Kind() {
 	case reflect.Struct:
@@ -28,14 +38,22 @@ func TypeSchema(t reflect.Type, defs map[string]jtd.Schema) *jtd.Schema {
 				break
 			}
 
+			name := t.Name()
+
+			if name != "" {
+				name = fmt.Sprintf("%s.%s", t.PkgPath(), name)
+				tdefs[t] = &NamedSchema{Name: name, Schema: schema}
+			}
+
 			schema.Properties = make(map[string]jtd.Schema)
+
 			for i := 0; i < t.NumField(); i++ {
 				f := t.Field(i)
 				name, omit := parseTag(f.Tag.Get("json"))
 				if name == "" {
 					name = f.Name
 				}
-				s := TypeSchema(f.Type, defs)
+				s := TypeSchema(f.Type, tdefs)
 				if omit {
 					if schema.OptionalProperties == nil {
 						schema.OptionalProperties = make(map[string]jtd.Schema)
@@ -48,28 +66,20 @@ func TypeSchema(t reflect.Type, defs map[string]jtd.Schema) *jtd.Schema {
 				}
 			}
 
-			if name := t.Name(); name != "" {
-				if s, ok := defs[name]; ok {
-					if reflect.DeepEqual(s, schema) {
-						schema = jtd.Schema{Ref: &name}
-					}
-				} else {
-					defs[name] = schema
-
-					schema = jtd.Schema{Ref: &name}
-
-				}
+			if nt, ok := tdefs[t]; ok {
+				nt.Schema = schema
+				return &jtd.Schema{Ref: &nt.Name}
 			}
 		}
 	case reflect.Pointer:
-		schema = *TypeSchema(t.Elem(), defs)
+		schema = *TypeSchema(t.Elem(), tdefs)
 		schema.Nullable = true
 	case reflect.Slice:
-		elems := TypeSchema(t.Elem(), defs)
+		elems := TypeSchema(t.Elem(), tdefs)
 		schema.Elements = elems
 		schema.Nullable = true
 	case reflect.Map:
-		vals := TypeSchema(t.Elem(), defs)
+		vals := TypeSchema(t.Elem(), tdefs)
 		schema.Values = vals
 		schema.Nullable = true
 	case reflect.String:
@@ -107,4 +117,26 @@ func TypeSchema(t reflect.Type, defs map[string]jtd.Schema) *jtd.Schema {
 	}
 
 	return &schema
+}
+
+func TypeDefs(tdefs map[reflect.Type]*NamedSchema) map[string]jtd.Schema {
+	defs := make(map[string]jtd.Schema)
+
+	for t, ns := range tdefs {
+		name := t.Name()
+		n := 1
+
+		for {
+			if _, ok := defs[name]; !ok {
+				break
+			}
+			n++
+			name = fmt.Sprintf("%s%d", t.Name(), n)
+		}
+
+		ns.Name = name
+		defs[ns.Name] = ns.Schema
+	}
+
+	return defs
 }

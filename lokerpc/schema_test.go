@@ -2,6 +2,7 @@ package lokerpc
 
 import (
 	"encoding/json"
+	"flag"
 	"reflect"
 	"testing"
 	"time"
@@ -26,9 +27,20 @@ func TestTypeSchema(t *testing.T) {
 		Foo string `json:"foo"`
 	}
 
+	// Name to conflict with flag.Flag
+	// Just chose it because its small
+	type Flag struct {
+		Foo string `json:"foo"`
+	}
+
+	type RecusiveStruct struct {
+		Name   string          `json:"name"`
+		Loopsy *RecusiveStruct `json:"loopsy"`
+	}
+
 	type args struct {
 		t    reflect.Type
-		defs map[string]jtd.Schema
+		defs map[reflect.Type]*NamedSchema
 	}
 	tests := []struct {
 		name string
@@ -132,7 +144,6 @@ func TestTypeSchema(t *testing.T) {
 					Foo NamedStruct
 					Bar *NamedStruct
 				}{}),
-				defs: make(map[string]jtd.Schema),
 			},
 			want: `{
 				"definitions": {
@@ -149,42 +160,39 @@ func TestTypeSchema(t *testing.T) {
 			}`,
 		},
 		{
-			name: "same named structs",
+			name: "deal with name conflicts",
 			args: args{
 				t: reflect.TypeOf(struct {
 					Foo NamedStruct
-					Bar *NamedStruct
+					Bar flag.Flag
+					Baz Flag
 				}{}),
-				defs: map[string]jtd.Schema{
-					"NamedStruct": {
-						Properties: map[string]jtd.Schema{
-							"nope": {
-								Type: "string",
-							},
-						},
-					},
-				},
 			},
 			want: `{
 				"definitions": {
 					"NamedStruct": {
 						"properties": {
-							"nope": { "type": "string" }
+							"foo": { "type": "string" }
+						}
+					},
+					"Flag": {
+						"properties": {
+							"Name": { "type": "string" },
+							"DefValue": { "type": "string" },
+							"Usage": { "type": "string" },
+							"Value": {}
+						}
+					},
+					"Flag2": {
+						"properties": {
+							"foo": { "type": "string" }
 						}
 					}
 				},
 				"properties": {
-					"Foo": {
-						"properties": {
-							"foo": { "type": "string" }
-						}
-					},
-					"Bar": {
-						"properties": {
-							"foo": { "type": "string" }
-						},
-						"nullable": true
-					}
+					"Foo": { "ref": "NamedStruct" },
+					"Bar": { "ref": "Flag" },
+					"Baz": { "ref": "Flag2" }
 				}
 			}`,
 		},
@@ -217,9 +225,36 @@ func TestTypeSchema(t *testing.T) {
 			},
 			want: `{"type":"string","nullable": true}`,
 		},
+		{
+			name: "recusive type",
+			args: args{
+				t: reflect.TypeOf(&RecusiveStruct{}),
+			},
+			want: `{
+				"definitions": {
+					"RecusiveStruct": {
+						"properties": {
+							"loopsy": {
+								"nullable": true,
+								"ref": "RecusiveStruct"
+							},
+							"name": {
+								"type": "string"
+							}
+						}
+					}
+				},
+				"nullable": true,
+				"ref": "RecusiveStruct"
+			}`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.args.defs == nil {
+				tt.args.defs = map[reflect.Type]*NamedSchema{}
+			}
+
 			var want jtd.Schema
 
 			err := json.Unmarshal([]byte(tt.want), &want)
@@ -229,7 +264,10 @@ func TestTypeSchema(t *testing.T) {
 
 			got := TypeSchema(tt.args.t, tt.args.defs)
 
-			got.Definitions = tt.args.defs
+			got.Definitions = TypeDefs(tt.args.defs)
+			if len(got.Definitions) == 0 {
+				got.Definitions = nil
+			}
 
 			if err := got.Validate(); err != nil {
 				t.Errorf("Validate() error = %v", err)
