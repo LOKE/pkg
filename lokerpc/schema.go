@@ -3,6 +3,7 @@ package lokerpc
 import (
 	"fmt"
 	"reflect"
+	"sort"
 	"time"
 
 	jtd "github.com/jsontypedef/json-typedef-go"
@@ -11,8 +12,9 @@ import (
 var timeType = reflect.TypeOf(time.Time{})
 
 type NamedSchema struct {
-	Name   string
-	Schema jtd.Schema
+	Name    string
+	SortKey string
+	Schema  jtd.Schema
 }
 
 func TypeSchema(t reflect.Type, tdefs map[reflect.Type]*NamedSchema) *jtd.Schema {
@@ -41,8 +43,11 @@ func TypeSchema(t reflect.Type, tdefs map[reflect.Type]*NamedSchema) *jtd.Schema
 			name := t.Name()
 
 			if name != "" {
-				name = fmt.Sprintf("%s.%s", t.PkgPath(), name)
-				tdefs[t] = &NamedSchema{Name: name, Schema: schema}
+				tdefs[t] = &NamedSchema{
+					Name:    name,
+					SortKey: fmt.Sprintf("%s.%s", t.PkgPath(), name),
+					Schema:  schema,
+				}
 			}
 
 			schema.Properties = make(map[string]jtd.Schema)
@@ -122,8 +127,17 @@ func TypeSchema(t reflect.Type, tdefs map[reflect.Type]*NamedSchema) *jtd.Schema
 func TypeDefs(tdefs map[reflect.Type]*NamedSchema) map[string]jtd.Schema {
 	defs := make(map[string]jtd.Schema)
 
-	for t, ns := range tdefs {
-		name := t.Name()
+	sorted := make([]*NamedSchema, 0, len(tdefs))
+	for _, ns := range tdefs {
+		sorted = append(sorted, ns)
+	}
+
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].SortKey < sorted[j].SortKey
+	})
+
+	for _, ns := range sorted {
+		name := ns.Name
 		n := 1
 
 		for {
@@ -131,7 +145,7 @@ func TypeDefs(tdefs map[reflect.Type]*NamedSchema) map[string]jtd.Schema {
 				break
 			}
 			n++
-			name = fmt.Sprintf("%s%d", t.Name(), n)
+			name = fmt.Sprintf("%s%d", ns.Name, n)
 		}
 
 		ns.Name = name
