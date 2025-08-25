@@ -234,13 +234,12 @@ func MountHandlers(logger log.Logger, mux Mux, services ...*Service) {
 	for _, service := range services {
 		ecm := wrapMetrics(service.Name, service.endpointCodecs)
 
-		defs := map[string]jtd.Schema{}
+		defs := map[reflect.Type]*NamedSchema{}
 
 		meta := &Meta{
 			ServiceName: service.Name,
 			MultiArg:    false,
 			Help:        service.Help,
-			Definitions: defs,
 		}
 
 		for methodName, ec := range ecm {
@@ -268,6 +267,8 @@ func MountHandlers(logger log.Logger, mux Mux, services ...*Service) {
 
 			meta.Interfaces = append(meta.Interfaces, endMeta)
 		}
+
+		meta.Definitions = TypeDefs(defs)
 
 		// service meta endpoint
 		mux.Handle("/rpc/"+service.Name, newMetaHandler(meta))
