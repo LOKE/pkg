@@ -1,0 +1,29 @@
+{
+  "serviceName": "stripe-payments",
+  "help": "Test service for AccountMetadata shape",
+  "multiArg": false,
+  "definitions": {
+    "AccountMetadata": {
+      "properties": {
+        "Organization ID": { "type": "string" },
+        "Organization Name": { "type": "string" },
+        "Operator URL": { "type": "string", "nullable": true },
+        "Environment": { "type": "string" }
+      },
+      "optionalProperties": {
+        "Location ID": { "type": "string", "nullable": true },
+        "Location Name": { "type": "string", "nullable": true }
+      }
+    }
+  },
+  "interfaces": [
+    {
+      "help": "Fetch account metadata",
+      "methodName": "getAccountMetadata",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": { "ref": "AccountMetadata" },
+      "responseTypeDef": { "ref": "AccountMetadata" }
+    }
+  ]
+}
