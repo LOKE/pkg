@@ -344,7 +344,9 @@ func wrapEndpoint(handlerName string, e Endpoint) Endpoint {
 		defer t.ObserveDuration()
 		defer func() {
 			if err != nil {
-				failures.WithLabelValues(handlerName, "unknown")
+				failures.WithLabelValues(handlerName, "unknown").Inc()
+			} else if e, ok := result.(Failer); ok && e.Failed() != nil {
+				failures.WithLabelValues(handlerName, "unknown").Inc()
 			}
 		}()
 		c.Inc()
