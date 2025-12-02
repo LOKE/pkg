@@ -54,6 +54,11 @@ func TypeSchema(t reflect.Type, tdefs map[reflect.Type]*NamedSchema) *jtd.Schema
 
 			for i := 0; i < t.NumField(); i++ {
 				f := t.Field(i)
+
+				if !f.IsExported() {
+					continue
+				}
+
 				name, omit := parseTag(f.Tag.Get("json"))
 				if name == "" {
 					name = f.Name
