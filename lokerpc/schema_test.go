@@ -24,7 +24,8 @@ func (textMarshaler) MarshalText() ([]byte, error) {
 
 func TestTypeSchema(t *testing.T) {
 	type NamedStruct struct {
-		Foo string `json:"foo"`
+		Foo  string `json:"foo"`
+		nope string
 	}
 
 	// Name to conflict with flag.Flag
