@@ -1,0 +1,160 @@
+{
+  "serviceName": "ordering",
+  "help": "ordering service",
+  "multiArg": false,
+  "definitions": {
+    "KountaMeta": {
+      "properties": {
+        "acceptedMessage": { "type": "string" },
+        "completedMessage": { "type": "string" },
+        "deliveryCompletedMessage": { "type": "string" },
+        "paymentMethods": {
+          "elements": {
+            "properties": {
+              "id": { "type": "int32" },
+              "name": { "type": "string" }
+            }
+          }
+        },
+        "rejectedMessage": { "type": "string" },
+        "sites": {
+          "elements": {
+            "properties": {
+              "id": { "type": "int32" },
+              "name": { "type": "string" }
+            }
+          }
+        },
+        "type": { "enum": ["native_kounta"] }
+      }
+    },
+    "OrderingConfigMeta": {
+      "discriminator": "type",
+      "mapping": {
+        "native_kounta": {
+          "properties": {
+            "acceptedMessage": { "type": "string" },
+            "completedMessage": { "type": "string" },
+            "deliveryCompletedMessage": { "type": "string" },
+            "paymentMethods": {
+              "elements": {
+                "properties": {
+                  "id": { "type": "int32" },
+                  "name": { "type": "string" }
+                }
+              }
+            },
+            "rejectedMessage": { "type": "string" },
+            "sites": {
+              "elements": {
+                "properties": {
+                  "id": { "type": "int32" },
+                  "name": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "native_zonal": {
+          "properties": {
+            "sites": {
+              "elements": {
+                "properties": {
+                  "id": { "type": "int32" },
+                  "name": { "type": "string" },
+                  "salesAreas": {
+                    "elements": {
+                      "properties": {
+                        "id": { "type": "int32" },
+                        "name": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "public_api": { "properties": {} }
+      },
+      "metadata": {
+        "union": [
+          { "ref": "KountaMeta" },
+          { "ref": "PublicApiMeta" },
+          { "ref": "ZonalMeta" }
+        ]
+      }
+    },
+    "PublicApiMeta": { "properties": { "type": { "enum": ["public_api"] } } },
+    "ZonalMeta": {
+      "properties": {
+        "sites": {
+          "elements": {
+            "properties": {
+              "id": { "type": "int32" },
+              "name": { "type": "string" },
+              "salesAreas": {
+                "elements": {
+                  "properties": {
+                    "id": { "type": "int32" },
+                    "name": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "type": { "enum": ["native_zonal"] }
+      }
+    },
+    "NormalDiscriminator": {
+      "discriminator": "kind",
+      "mapping": {
+        "foo": {
+          "properties": {
+            "fooValue": { "type": "string" }
+          }
+        },
+        "bar": {
+          "properties": {
+            "barValue": { "type": "int32" }
+          }
+        }
+      }
+    },
+    "MetadataOnlyUnion": {
+      "metadata": {
+        "union": [
+          { "ref": "KountaMeta" },
+          { "ref": "ZonalMeta" }
+        ]
+      }
+    }
+  },
+  "interfaces": [
+    {
+      "help": "get config",
+      "methodName": "getConfig",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": { "properties": {} },
+      "responseTypeDef": { "ref": "OrderingConfigMeta" }
+    },
+    {
+      "help": "get normal discriminator",
+      "methodName": "getNormal",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": { "properties": {} },
+      "responseTypeDef": { "ref": "NormalDiscriminator" }
+    },
+    {
+      "help": "get metadata only union",
+      "methodName": "getMetadataOnly",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": { "properties": {} },
+      "responseTypeDef": { "ref": "MetadataOnlyUnion" }
+    }
+  ]
+}

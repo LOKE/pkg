@@ -7,18 +7,18 @@ export type GetUserRequest = {
 
 export type GetUserResponse = {
   comments: ({
-    text: string;
-    timestamp: string;
-  } | null)[];
+  text: string;
+  timestamp: string;
+} | null)[];
   name: string;
 };
 
 /**
- *
+ * 
  */
 export class NestedService extends RPCContextClient {
   constructor(baseUrl: string) {
-    super(baseUrl, "nested");
+    super(baseUrl, "nested")
   }
   /**
    * hello1 method

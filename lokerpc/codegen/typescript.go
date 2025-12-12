@@ -14,6 +14,20 @@ import (
 func GenTypescriptType(schema jtd.Schema) string {
 	var t string
 
+	// Check if metadata.union is present with refs - this overrides the normal form handling
+	if unionRefs, ok := extractUnionRefs(schema.Metadata); ok {
+		for i, ref := range unionRefs {
+			if i > 0 {
+				t += " | "
+			}
+			t += capitalize(ref)
+		}
+		if schema.Nullable {
+			t += " | null"
+		}
+		return t
+	}
+
 	switch schema.Form() {
 	case jtd.FormRef:
 		t += capitalize(*schema.Ref)
@@ -178,4 +192,36 @@ func tsDocComment(w io.Writer, text string, indent string) {
 		fmt.Fprintf(w, "%s * %s\n", indent, l)
 	}
 	fmt.Fprintf(w, "%s */\n", indent)
+}
+
+// extractUnionRefs extracts ref names from metadata.union if present.
+// The union field should be an array of objects with "ref" keys.
+func extractUnionRefs(metadata map[string]any) ([]string, bool) {
+	if metadata == nil {
+		return nil, false
+	}
+	union, ok := metadata["union"]
+	if !ok {
+		return nil, false
+	}
+	unionSlice, ok := union.([]any)
+	if !ok {
+		return nil, false
+	}
+	var refs []string
+	for _, item := range unionSlice {
+		itemMap, ok := item.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		ref, ok := itemMap["ref"].(string)
+		if !ok {
+			return nil, false
+		}
+		refs = append(refs, ref)
+	}
+	if len(refs) == 0 {
+		return nil, false
+	}
+	return refs, true
 }
