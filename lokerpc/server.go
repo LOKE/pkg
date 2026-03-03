@@ -84,6 +84,7 @@ type EndpointCodec struct {
 	requestType      reflect.Type
 	responseType     reflect.Type
 	errOnNilResponse bool
+	voidResponse     bool
 }
 
 // EndpointCodecMap maps the Request.Method to the proper EndpointCodec
@@ -164,6 +165,12 @@ func MakeStandardEndpointCodec[Req any, Res any](method StandardMethod[Req, Res]
 func NoNilResponse() EndpointCodecOption {
 	return func(ec *EndpointCodec) {
 		ec.errOnNilResponse = true
+	}
+}
+
+func VoidResponse() EndpointCodecOption {
+	return func(ec *EndpointCodec) {
+		ec.voidResponse = true
 	}
 }
 
@@ -258,7 +265,11 @@ func MountHandlers(logger log.Logger, mux Mux, services ...*Service) {
 				endMeta.RequestTypeDef = TypeSchema(ec.requestType, defs)
 				endMeta.RequestTypeDef.Nullable = false
 			}
-			if ec.responseType != nil {
+			if ec.voidResponse {
+				endMeta.ResponseTypeDef = &jtd.Schema{
+					Metadata: map[string]any{"void": true},
+				}
+			} else if ec.responseType != nil {
 				endMeta.ResponseTypeDef = TypeSchema(ec.responseType, defs)
 				if ec.errOnNilResponse {
 					endMeta.ResponseTypeDef.Nullable = false
