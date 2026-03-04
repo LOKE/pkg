@@ -3,8 +3,8 @@ import (
 )
 
 type User struct {
-	Name         string `json:"name"`
 	Anything     any    `json:"anything"`
+	Name         string `json:"name"`
 	AnythingElse any    `json:"anythingElse,omitempty"`
 }
 

@@ -7,11 +7,11 @@ type GetUserRequest struct {
 }
 
 type GetUserResponse struct {
-	Name     string `json:"name"`
 	Comments []*struct {
 		Text      string    `json:"text"`
 		Timestamp time.Time `json:"timestamp"`
 	} `json:"comments"`
+	Name string `json:"name"`
 }
 
 type NestedService interface {

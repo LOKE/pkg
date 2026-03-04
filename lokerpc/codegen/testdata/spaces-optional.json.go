@@ -3,12 +3,12 @@ import (
 )
 
 type AccountMetadata struct {
-	OperatorURL      *string `json:"Operator URL"`
 	Environment      string  `json:"Environment"`
+	OperatorURL      *string `json:"Operator URL"`
 	OrganizationID   string  `json:"Organization ID"`
 	OrganizationName string  `json:"Organization Name"`
-	LocationID       *string `json:"Location ID,omitempty"`
-	LocationName     *string `json:"Location Name,omitempty"`
+	LocationID       any     `json:"Location ID,omitempty"`
+	LocationName     any     `json:"Location Name,omitempty"`
 }
 
 type StripePaymentsService interface {

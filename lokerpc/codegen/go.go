@@ -53,11 +53,11 @@ func GenGoType(schema jtd.Schema) string {
 		t += "map[string]" + GenGoType(*schema.Values)
 	case jtd.FormProperties:
 		t += "struct {\n"
-		for k, v := range schema.Properties {
-			t += "\t" + goFieldName(k) + " " + GenGoType(v) + "`json:\"" + k + "\"`\n"
+		for _, k := range sortedKeys(schema.Properties) {
+			t += "\t" + goFieldName(k) + " " + GenGoType(schema.Properties[k]) + "`json:\"" + k + "\"`\n"
 		}
-		for k, v := range schema.OptionalProperties {
-			t += "\t" + goFieldName(k) + " " + GenGoType(v) + "`json:\"" + k + ",omitempty\"`\n"
+		for _, k := range sortedKeys(schema.OptionalProperties) {
+			t += "\t" + goFieldName(k) + " " + GenGoType(schema.Properties[k]) + "`json:\"" + k + ",omitempty\"`\n"
 		}
 		t += "}"
 	case jtd.FormDiscriminator:
@@ -104,13 +104,13 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 		resType := "any"
 		if v.ResponseTypeDef != nil {
 			if v.ResponseTypeDef.Metadata["void"] == true {
-				resType = "any"
+				resType = "struct{}"
 			} else {
 				resType = GenGoType(*v.ResponseTypeDef)
-			}
 
-			if !strings.HasPrefix(resType, "[]") && !strings.HasPrefix(resType, "map[") && !strings.HasPrefix(resType, "*") {
-				resType = "*" + resType
+				if !strings.HasPrefix(resType, "[]") && !strings.HasPrefix(resType, "map[") && !strings.HasPrefix(resType, "*") {
+					resType = "*" + resType
+				}
 			}
 		}
 
@@ -132,7 +132,7 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 		resType := "any"
 		if v.ResponseTypeDef != nil {
 			if v.ResponseTypeDef.Metadata["void"] == true {
-				resType = "any"
+				resType = "struct{}"
 			} else {
 				resType = GenGoType(*v.ResponseTypeDef)
 
