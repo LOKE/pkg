@@ -57,7 +57,7 @@ func GenGoType(schema jtd.Schema) string {
 			t += "\t" + goFieldName(k) + " " + GenGoType(schema.Properties[k]) + "`json:\"" + k + "\"`\n"
 		}
 		for _, k := range sortedKeys(schema.OptionalProperties) {
-			t += "\t" + goFieldName(k) + " " + GenGoType(schema.Properties[k]) + "`json:\"" + k + ",omitempty\"`\n"
+			t += "\t" + goFieldName(k) + " " + GenGoType(schema.OptionalProperties[k]) + "`json:\"" + k + ",omitempty\"`\n"
 		}
 		t += "}"
 	case jtd.FormDiscriminator:

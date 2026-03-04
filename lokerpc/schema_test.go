@@ -126,6 +126,13 @@ func TestTypeSchema(t *testing.T) {
 			}`,
 		},
 		{
+			name: "empty struct",
+			args: args{
+				t: reflect.TypeOf(struct{}{}),
+			},
+			want: `{"properties": {}}`,
+		},
+		{
 			name: "timestamp",
 			args: args{
 				t: reflect.TypeOf(struct {
@@ -277,7 +284,7 @@ func TestTypeSchema(t *testing.T) {
 			if !reflect.DeepEqual(got, &want) {
 				gotstr, _ := json.MarshalIndent(got, "", "  ")
 				wantstr, _ := json.MarshalIndent(want, "", "  ")
-				t.Errorf("TypeSchema() = %s, want %s", gotstr, wantstr)
+				t.Errorf("TypeSchema() = %q, want %q", gotstr, wantstr)
 			}
 		})
 	}
