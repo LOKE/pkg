@@ -82,7 +82,11 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 
 	b := bufio.NewWriter(w)
 
+	fmt.Fprintf(b, "package %s\n", strings.ToLower(strings.ReplaceAll(meta.ServiceName, "-", "")))
+	b.WriteString("\n")
 	b.WriteString("import (\n")
+	b.WriteString("\t\"context\"\n")
+	b.WriteString("\n")
 	b.WriteString("\t\"github.com/LOKE/pkg/lokerpc\"\n")
 	b.WriteString(")\n")
 
@@ -122,7 +126,7 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 	// Service client implementation
 	b.WriteString("\n")
 	// goDocComment(b, meta.Help, "")
-	b.WriteString("type " + goFieldName(meta.ServiceName) + "RPCClient struct{}\n\n")
+	b.WriteString("type " + goFieldName(meta.ServiceName) + "RPCClient struct{\nlokerpc.Client}\n\n")
 	for _, v := range meta.Interfaces {
 		reqType := "any"
 		if v.RequestTypeDef != nil {

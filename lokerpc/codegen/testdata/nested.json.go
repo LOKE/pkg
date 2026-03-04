@@ -1,4 +1,8 @@
+package nested
+
 import (
+	"context"
+
 	"github.com/LOKE/pkg/lokerpc"
 )
 
@@ -18,7 +22,9 @@ type NestedService interface {
 	GetUser(context.Context, GetUserRequest) (*GetUserResponse, error)
 }
 
-type NestedRPCClient struct{}
+type NestedRPCClient struct {
+	lokerpc.Client
+}
 
 func (c NestedRPCClient) GetUser(ctx context.Context, req GetUserRequest) (*GetUserResponse, error) {
 	var res GetUserResponse

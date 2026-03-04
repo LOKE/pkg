@@ -1,4 +1,8 @@
+package typed
+
 import (
+	"context"
+
 	"github.com/LOKE/pkg/lokerpc"
 )
 
@@ -22,7 +26,9 @@ type TypedService interface {
 	GetUser(context.Context, GetUserRequest_) (*GetUserResponse_, error)
 }
 
-type TypedRPCClient struct{}
+type TypedRPCClient struct {
+	lokerpc.Client
+}
 
 func (c TypedRPCClient) GetUser(ctx context.Context, req GetUserRequest_) (*GetUserResponse_, error) {
 	var res GetUserResponse_

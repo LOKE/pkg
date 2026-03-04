@@ -1,4 +1,8 @@
+package stripepayments
+
 import (
+	"context"
+
 	"github.com/LOKE/pkg/lokerpc"
 )
 
@@ -15,7 +19,9 @@ type StripePaymentsService interface {
 	GetAccountMetadata(context.Context, AccountMetadata) (*AccountMetadata, error)
 }
 
-type StripePaymentsRPCClient struct{}
+type StripePaymentsRPCClient struct {
+	lokerpc.Client
+}
 
 func (c StripePaymentsRPCClient) GetAccountMetadata(ctx context.Context, req AccountMetadata) (*AccountMetadata, error) {
 	var res AccountMetadata
