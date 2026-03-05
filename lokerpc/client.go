@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/LOKE/pkg/requestid"
 )
@@ -15,7 +16,7 @@ func NewClient(baseURL string) Client {
 }
 
 func newClientWithClient(baseURL string, client *http.Client) Client {
-	return Client{bURL: baseURL, client: client}
+	return Client{bURL: normalizeBaseURL(baseURL), client: client}
 }
 
 // NOTE: Maybe this should be exported, leaving it for now -- Dom
@@ -48,6 +49,10 @@ func (e *rpcClientError) Error() string {
 type Client struct {
 	bURL   string
 	client *http.Client
+}
+
+func normalizeBaseURL(baseURL string) string {
+	return strings.TrimRight(baseURL, "/") + "/"
 }
 
 func (c Client) DoRequest(ctx context.Context, method string, args, result any) error {
