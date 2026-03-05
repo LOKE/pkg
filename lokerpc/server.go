@@ -81,9 +81,11 @@ type EndpointCodec struct {
 	Help       string
 	ParamNames []string
 
-	requestType      reflect.Type
-	responseType     reflect.Type
-	errOnNilResponse bool
+	requestType             reflect.Type
+	responseType            reflect.Type
+	requestTypeDefOverride  *jtd.Schema
+	responseTypeDefOverride *jtd.Schema
+	errOnNilResponse        bool
 }
 
 // EndpointCodecMap maps the Request.Method to the proper EndpointCodec
@@ -164,6 +166,18 @@ func MakeStandardEndpointCodec[Req any, Res any](method StandardMethod[Req, Res]
 func NoNilResponse() EndpointCodecOption {
 	return func(ec *EndpointCodec) {
 		ec.errOnNilResponse = true
+	}
+}
+
+func WithRequestTypeDef(schema *jtd.Schema) EndpointCodecOption {
+	return func(ec *EndpointCodec) {
+		ec.requestTypeDefOverride = schema
+	}
+}
+
+func WithResponseTypeDef(schema *jtd.Schema) EndpointCodecOption {
+	return func(ec *EndpointCodec) {
+		ec.responseTypeDefOverride = schema
 	}
 }
 
@@ -254,11 +268,19 @@ func MountHandlers(logger log.Logger, mux Mux, services ...*Service) {
 				ParamNames:    ec.ParamNames,
 			}
 
-			if ec.requestType != nil {
+			if ec.requestTypeDefOverride != nil {
+				endMeta.RequestTypeDef = cloneSchema(ec.requestTypeDefOverride)
+			} else if ec.requestType != nil {
 				endMeta.RequestTypeDef = TypeSchema(ec.requestType, defs)
 				endMeta.RequestTypeDef.Nullable = false
 			}
-			if ec.responseType != nil {
+
+			if ec.responseTypeDefOverride != nil {
+				endMeta.ResponseTypeDef = cloneSchema(ec.responseTypeDefOverride)
+				if ec.errOnNilResponse {
+					endMeta.ResponseTypeDef.Nullable = false
+				}
+			} else if ec.responseType != nil {
 				endMeta.ResponseTypeDef = TypeSchema(ec.responseType, defs)
 				if ec.errOnNilResponse {
 					endMeta.ResponseTypeDef.Nullable = false
@@ -318,6 +340,14 @@ func parseTag(tag string) (string, bool) {
 		return tag[:idx], tag[idx+1:] == "omitempty"
 	}
 	return tag, false
+}
+
+func cloneSchema(schema *jtd.Schema) *jtd.Schema {
+	if schema == nil {
+		return nil
+	}
+	cloned := *schema
+	return &cloned
 }
 
 func wrapMetrics(serviceName string, ecm EndpointCodecMap) EndpointCodecMap {
