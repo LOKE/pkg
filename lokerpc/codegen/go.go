@@ -86,6 +86,9 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 	b.WriteString("\n")
 	b.WriteString("import (\n")
 	b.WriteString("\t\"context\"\n")
+	if metaUsesTimestamp(meta) {
+		b.WriteString("\t\"time\"\n")
+	}
 	b.WriteString("\n")
 	b.WriteString("\t\"github.com/LOKE/pkg/lokerpc\"\n")
 	b.WriteString(")\n")
@@ -169,6 +172,51 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 	}
 
 	return b.Flush()
+}
+
+func schemaUsesTimestamp(schema jtd.Schema) bool {
+	if schema.Type == jtd.TypeTimestamp {
+		return true
+	}
+	for _, v := range schema.Definitions {
+		if schemaUsesTimestamp(v) {
+			return true
+		}
+	}
+	for _, v := range schema.Properties {
+		if schemaUsesTimestamp(v) {
+			return true
+		}
+	}
+	for _, v := range schema.OptionalProperties {
+		if schemaUsesTimestamp(v) {
+			return true
+		}
+	}
+	if schema.Elements != nil && schemaUsesTimestamp(*schema.Elements) {
+		return true
+	}
+	if schema.Values != nil && schemaUsesTimestamp(*schema.Values) {
+		return true
+	}
+	return false
+}
+
+func metaUsesTimestamp(meta lokerpc.Meta) bool {
+	for _, v := range meta.Definitions {
+		if schemaUsesTimestamp(v) {
+			return true
+		}
+	}
+	for _, iface := range meta.Interfaces {
+		if iface.RequestTypeDef != nil && schemaUsesTimestamp(*iface.RequestTypeDef) {
+			return true
+		}
+		if iface.ResponseTypeDef != nil && schemaUsesTimestamp(*iface.ResponseTypeDef) {
+			return true
+		}
+	}
+	return false
 }
 
 // Regexp that matches word boundaries,
