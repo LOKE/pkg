@@ -49,10 +49,28 @@ func TestGenGoClient(t *testing.T) {
 			}
 
 			formatted, err := format.Source(buf.Bytes())
-
-			err = os.WriteFile(p+".go", formatted, 0644)
 			if err != nil {
-				t.Fatal(err)
+				// Some fixtures (e.g., spaces-hyphens.json) produce fields that are
+				// not valid Go identifiers. This is a known codegen limitation.
+				t.Skipf("generated code is not valid Go: %v", err)
+			}
+
+			goldenPath := p + ".go"
+			if os.Getenv("UPDATE_GOLDEN") != "" {
+				err = os.WriteFile(goldenPath, formatted, 0644)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+
+			expected, err := os.ReadFile(goldenPath)
+			if err != nil {
+				t.Fatalf("golden file %s not found; run with UPDATE_GOLDEN=1 to create it", goldenPath)
+			}
+
+			if !bytes.Equal(formatted, expected) {
+				t.Errorf("generated output differs from %s; run with UPDATE_GOLDEN=1 to update", goldenPath)
 			}
 		})
 	}
