@@ -103,9 +103,11 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 		}
 
 		resType := "any"
+		isVoid := false
 		if v.ResponseTypeDef != nil {
 			if v.ResponseTypeDef.Metadata["void"] == true {
-				resType = "struct{}"
+				isVoid = true
+				resType = ""
 			} else {
 				resType = GenGoType(*v.ResponseTypeDef, imports)
 
@@ -116,7 +118,11 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 		}
 
 		// goDocComment(b, v.Help, "\t")
-		fmt.Fprintf(&b, "\t%s(context.Context, %s) (%s, error)\n", goFieldName(v.MethodName), reqType, resType)
+		if isVoid {
+			fmt.Fprintf(&b, "\t%s(context.Context, %s) error\n", goFieldName(v.MethodName), reqType)
+		} else {
+			fmt.Fprintf(&b, "\t%s(context.Context, %s) (%s, error)\n", goFieldName(v.MethodName), reqType, resType)
+		}
 	}
 	b.WriteString("}\n")
 
@@ -131,9 +137,11 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 		}
 
 		resType := "any"
+		isVoid := false
 		if v.ResponseTypeDef != nil {
 			if v.ResponseTypeDef.Metadata["void"] == true {
-				resType = "struct{}"
+				isVoid = true
+				resType = ""
 			} else {
 				resType = GenGoType(*v.ResponseTypeDef, imports)
 
@@ -143,26 +151,31 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 			}
 		}
 
-		varType := resType
-		if varType != "any" && strings.HasPrefix(varType, "*") {
-			varType = varType[1:]
-		}
-
-		// goDocComment(b, v.Help, "\t")
-		fmt.Fprintf(&b, "func (c %sRPCClient) %s(ctx context.Context, req %s) (%s, error) {\n", goFieldName(meta.ServiceName), goFieldName(v.MethodName), reqType, resType)
-		fmt.Fprintf(&b, "\tvar res %s\n", varType)
-		fmt.Fprintf(&b, "\terr := c.DoRequest(ctx, \"%s\", req, &res)\n", v.MethodName)
-		fmt.Fprintf(&b, "\tif err != nil {\n")
-		fmt.Fprintf(&b, "\t\treturn nil, err\n")
-		fmt.Fprintf(&b, "\t}\n")
-		if resType == "any" {
-			fmt.Fprintf(&b, "\treturn res, nil\n")
-		} else if strings.HasPrefix(resType, "*") {
-			fmt.Fprintf(&b, "\treturn &res, nil\n")
+		if isVoid {
+			fmt.Fprintf(&b, "func (c %sRPCClient) %s(ctx context.Context, req %s) error {\n", goFieldName(meta.ServiceName), goFieldName(v.MethodName), reqType)
+			fmt.Fprintf(&b, "\treturn c.DoRequest(ctx, \"%s\", req, nil)\n", v.MethodName)
+			fmt.Fprintf(&b, "}\n")
 		} else {
-			fmt.Fprintf(&b, "\treturn res, nil\n")
+			varType := resType
+			if varType != "any" && strings.HasPrefix(varType, "*") {
+				varType = varType[1:]
+			}
+
+			fmt.Fprintf(&b, "func (c %sRPCClient) %s(ctx context.Context, req %s) (%s, error) {\n", goFieldName(meta.ServiceName), goFieldName(v.MethodName), reqType, resType)
+			fmt.Fprintf(&b, "\tvar res %s\n", varType)
+			fmt.Fprintf(&b, "\terr := c.DoRequest(ctx, \"%s\", req, &res)\n", v.MethodName)
+			fmt.Fprintf(&b, "\tif err != nil {\n")
+			fmt.Fprintf(&b, "\t\treturn nil, err\n")
+			fmt.Fprintf(&b, "\t}\n")
+			if resType == "any" {
+				fmt.Fprintf(&b, "\treturn res, nil\n")
+			} else if strings.HasPrefix(resType, "*") {
+				fmt.Fprintf(&b, "\treturn &res, nil\n")
+			} else {
+				fmt.Fprintf(&b, "\treturn res, nil\n")
+			}
+			fmt.Fprintf(&b, "}\n")
 		}
-		fmt.Fprintf(&b, "}\n")
 	}
 
 	// Write header
