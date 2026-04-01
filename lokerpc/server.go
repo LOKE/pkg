@@ -84,6 +84,7 @@ type EndpointCodec struct {
 	requestType      reflect.Type
 	responseType     reflect.Type
 	errOnNilResponse bool
+	voidResponse     bool
 }
 
 // EndpointCodecMap maps the Request.Method to the proper EndpointCodec
@@ -129,11 +130,21 @@ func DecodeRequest[Req any](_ context.Context, msg json.RawMessage) (any, error)
 
 type StandardMethod[Req any, Res any] func(context.Context, Req) (Res, error)
 
+type VoidMethod[Req any] func(context.Context, Req) error
+
 func MakeStandardEndpoint[Req any, Res any](method StandardMethod[Req, Res]) Endpoint {
 	return func(ctx context.Context, request any) (any, error) {
 		req := request.(Req)
 		res, err := method(ctx, req)
 		return standardResponse{res, err}, nil
+	}
+}
+
+func MakeVoidEndpoint[Req any](method VoidMethod[Req]) Endpoint {
+	return func(ctx context.Context, request any) (any, error) {
+		req := request.(Req)
+		err := method(ctx, req)
+		return standardResponse{nil, err}, nil
 	}
 }
 
@@ -152,6 +163,29 @@ func MakeStandardEndpointCodec[Req any, Res any](method StandardMethod[Req, Res]
 
 		requestType:  reflect.TypeOf(req),
 		responseType: reflect.TypeOf(res),
+	}
+
+	for _, opt := range opts {
+		opt(&ec)
+	}
+
+	return ec
+}
+
+// MakeVoidEndpointCodec creates an EndpointCodec for methods that return no value.
+// The generated metadata will include "void": true on the response type.
+func MakeVoidEndpointCodec[Req any](method VoidMethod[Req], help string, opts ...EndpointCodecOption) EndpointCodec {
+	var req Req
+
+	ec := EndpointCodec{
+		Endpoint:   MakeVoidEndpoint(method),
+		Decode:     DecodeRequest[Req],
+		ParamNames: FieldNames(req),
+		Help:       help,
+
+		requestType:  reflect.TypeOf(req),
+		responseType: nil,
+		voidResponse: true,
 	}
 
 	for _, opt := range opts {
@@ -258,7 +292,11 @@ func MountHandlers(logger log.Logger, mux Mux, services ...*Service) {
 				endMeta.RequestTypeDef = TypeSchema(ec.requestType, defs)
 				endMeta.RequestTypeDef.Nullable = false
 			}
-			if ec.responseType != nil {
+			if ec.voidResponse {
+				endMeta.ResponseTypeDef = &jtd.Schema{
+					Metadata: map[string]any{"void": true},
+				}
+			} else if ec.responseType != nil {
 				endMeta.ResponseTypeDef = TypeSchema(ec.responseType, defs)
 				if ec.errOnNilResponse {
 					endMeta.ResponseTypeDef.Nullable = false
@@ -401,7 +439,7 @@ func makeHandler(logger log.Logger, ec EndpointCodec) http.HandlerFunc {
 				result = r.Result()
 			}
 
-			if result == nil && ec.errOnNilResponse {
+			if result == nil && ec.errOnNilResponse && !ec.voidResponse {
 				logErr("err", "unexpected nil response")
 
 				status = http.StatusInternalServerError
