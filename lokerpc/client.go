@@ -19,8 +19,8 @@ func newClientWithClient(baseURL string, client *http.Client) Client {
 	return Client{bURL: normalizeBaseURL(baseURL), client: client}
 }
 
-// NOTE: Maybe this should be exported, leaving it for now -- Dom
-type rpcClientError struct {
+// RPCError is the structured error returned by a remote RPC endpoint.
+type RPCError struct {
 	Message   string
 	Instance  string
 	Expose    bool
@@ -29,21 +29,24 @@ type rpcClientError struct {
 	Type      string
 }
 
-func (e *rpcClientError) ErrorID() string {
+func (e *RPCError) ErrorID() string {
 	return e.Instance
 }
 
-func (e *rpcClientError) ErrorType() string {
+func (e *RPCError) ErrorType() string {
 	return e.Type
 }
 
-func (e *rpcClientError) Public() bool {
+func (e *RPCError) ErrorCode() string {
+	return e.Code
+}
+
+func (e *RPCError) Public() bool {
 	return e.Expose
 }
 
-func (e *rpcClientError) Error() string {
+func (e *RPCError) Error() string {
 	return e.Message
-	// return fmt.Sprintf("RPC Error response: %s", e.Message)
 }
 
 type Client struct {
@@ -104,7 +107,7 @@ func (c Client) DoRequest(ctx context.Context, method string, args, result any) 
 	case http.StatusNotFound:
 		return fmt.Errorf("Error rpc method not found: %v", url)
 	default:
-		err := &rpcClientError{}
+		err := &RPCError{}
 		jsonErr := json.NewDecoder(res.Body).Decode(err)
 		if jsonErr != nil {
 			return fmt.Errorf("Error decoding rpc error response: %v", jsonErr)

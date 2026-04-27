@@ -54,6 +54,11 @@ type Failer interface {
 	Failed() error
 }
 
+// Coder can be implemented by errors to include a machine-readable code in RPC error responses.
+type Coder interface {
+	ErrorCode() string
+}
+
 // Service
 type Service struct {
 	Name string
@@ -431,9 +436,14 @@ func makeHandler(logger log.Logger, ec EndpointCodec) http.HandlerFunc {
 			logErr("err", e.Failed())
 
 			status = http.StatusBadRequest
-			result = struct {
+			errResp := struct {
 				Message string `json:"message"`
-			}{e.Failed().Error()}
+				Code    string `json:"code,omitempty"`
+			}{Message: e.Failed().Error()}
+			if c, ok := e.Failed().(Coder); ok {
+				errResp.Code = c.ErrorCode()
+			}
+			result = errResp
 		} else {
 			if r, ok := result.(Resulter); ok {
 				result = r.Result()
