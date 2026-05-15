@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/LOKE/pkg/lokerr"
 	"github.com/LOKE/pkg/requestid"
 )
 
@@ -19,32 +20,6 @@ func newClientWithClient(baseURL string, client *http.Client) Client {
 	return Client{bURL: normalizeBaseURL(baseURL), client: client}
 }
 
-// NOTE: Maybe this should be exported, leaving it for now -- Dom
-type rpcClientError struct {
-	Message   string
-	Instance  string
-	Expose    bool
-	Code      string
-	Namespace string
-	Type      string
-}
-
-func (e *rpcClientError) ErrorID() string {
-	return e.Instance
-}
-
-func (e *rpcClientError) ErrorType() string {
-	return e.Type
-}
-
-func (e *rpcClientError) Public() bool {
-	return e.Expose
-}
-
-func (e *rpcClientError) Error() string {
-	return e.Message
-	// return fmt.Sprintf("RPC Error response: %s", e.Message)
-}
 
 type Client struct {
 	bURL   string
@@ -104,12 +79,11 @@ func (c Client) DoRequest(ctx context.Context, method string, args, result any) 
 	case http.StatusNotFound:
 		return fmt.Errorf("Error rpc method not found: %v", url)
 	default:
-		err := &rpcClientError{}
-		jsonErr := json.NewDecoder(res.Body).Decode(err)
-		if jsonErr != nil {
+		lErr := &lokerr.Error{}
+		if jsonErr := json.NewDecoder(res.Body).Decode(lErr); jsonErr != nil {
 			return fmt.Errorf("Error decoding rpc error response: %v", jsonErr)
 		}
-		return err
+		return lErr
 	}
 	return nil
 }

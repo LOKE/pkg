@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/LOKE/pkg/lokerr"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	jtd "github.com/jsontypedef/json-typedef-go"
@@ -428,12 +429,17 @@ func makeHandler(logger log.Logger, ec EndpointCodec) http.HandlerFunc {
 		status := http.StatusOK
 
 		if e, ok := result.(Failer); ok && e.Failed() != nil {
-			logErr("err", e.Failed())
+			failed := e.Failed()
+			logErr("err", failed)
 
 			status = http.StatusBadRequest
-			result = struct {
-				Message string `json:"message"`
-			}{e.Failed().Error()}
+			if lErr, ok := lokerr.As(failed); ok {
+				result = lErr
+			} else {
+				result = struct {
+					Message string `json:"message"`
+				}{failed.Error()}
+			}
 		} else {
 			if r, ok := result.(Resulter); ok {
 				result = r.Result()
