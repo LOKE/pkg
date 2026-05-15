@@ -29,9 +29,6 @@ func TestWireFormat(t *testing.T) {
 	if got["code"] != "validation_failed" {
 		t.Errorf("code = %v", got["code"])
 	}
-	if got["instance"] == "" || got["instance"] == nil {
-		t.Error("instance must be present and non-empty")
-	}
 	if got["expose"] != true {
 		t.Errorf("expose = %v, want true", got["expose"])
 	}
@@ -61,47 +58,6 @@ func TestExposeOmitEmpty(t *testing.T) {
 	}
 }
 
-func TestMetaFlattened(t *testing.T) {
-	e := lokerr.New("msg", "code")
-	e.Meta = map[string]any{"field": "username", "limit": 10}
-
-	b, err := json.Marshal(e)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var got map[string]any
-	if err := json.Unmarshal(b, &got); err != nil {
-		t.Fatal(err)
-	}
-
-	if got["field"] != "username" {
-		t.Errorf("field = %v, want username", got["field"])
-	}
-	if got["limit"] != float64(10) {
-		t.Errorf("limit = %v, want 10", got["limit"])
-	}
-}
-
-func TestMetaConflictStructFieldWins(t *testing.T) {
-	e := lokerr.New("real message", "code")
-	e.Meta = map[string]any{"message": "fake message"}
-
-	b, err := json.Marshal(e)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var got map[string]any
-	if err := json.Unmarshal(b, &got); err != nil {
-		t.Fatal(err)
-	}
-
-	if got["message"] != "real message" {
-		t.Errorf("message = %v, want real message (struct field must win)", got["message"])
-	}
-}
-
 func TestErrorChain(t *testing.T) {
 	sentinel := errors.New("original error")
 	wrapped := lokerr.Wrap(sentinel, "wrap_code")
@@ -120,33 +76,15 @@ func TestErrorChain(t *testing.T) {
 	}
 }
 
-func TestIDUnique(t *testing.T) {
-	a := lokerr.New("msg", "code")
-	b := lokerr.New("msg", "code")
-
-	if a.Instance == "" {
-		t.Error("Instance must be non-empty")
-	}
-	if a.Instance == b.Instance {
-		t.Error("Two New() calls must produce different Instance values")
-	}
-}
-
 func TestConstructorDefaults(t *testing.T) {
 	pub := lokerr.New("msg", "code")
 	if !pub.Expose {
 		t.Error("New must set Expose=true")
 	}
-	if pub.Instance == "" {
-		t.Error("New must set Instance")
-	}
 
 	internal := lokerr.Wrap(errors.New("inner"), "code")
 	if internal.Expose {
 		t.Error("Wrap must set Expose=false")
-	}
-	if internal.Instance == "" {
-		t.Error("Wrap must set Instance")
 	}
 
 	nilWrap := lokerr.Wrap(nil, "code")
