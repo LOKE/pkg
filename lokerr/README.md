@@ -2,29 +2,41 @@
 
 Structured, RPC-serializable errors for Go services. Wire-format compatible with the [`@loke/errors`](https://github.com/LOKE/errors) Node.js package.
 
-## Usage
+## Design
+
+`lokerr` is interface-based. The `lokerr.Error` interface is what `lokerpc` and application code work against — any struct that implements it will be serialized in full over RPC. `BaseError` is provided as a convenience type for straightforward cases; define your own struct when you need extra fields.
+
+## The interface
+
+```go
+type Error interface {
+    error
+    Public() bool      // true = safe to show in a UI; false = log only
+    ErrorCode() string // machine-readable code, e.g. "validation_failed"
+}
+```
+
+Any type implementing these three methods integrates with `lokerpc` automatically.
+
+## Using BaseError
 
 ```go
 import "github.com/LOKE/pkg/lokerr"
-```
 
-### Creating errors
-
-```go
-// Public error — safe to display in a UI (expose: true)
+// Public error — expose: true, safe to show in a UI
 err := lokerr.New("The value provided was null.", "null_value")
 
 // Public error with formatted message
 err := lokerr.Errorf("validation_failed", "field %q is required", "email")
 
-// Internal error — logged only, not shown to users (expose: false)
+// Internal error — expose: false, logged but not shown to users
 err := lokerr.Wrap(dbErr, "db_query_failed")
 
-// Internal error with a separate public message
+// Internal error with a separate safe public message
 err := lokerr.WrapPublic(dbErr, "db_query_failed", "Something went wrong.")
 ```
 
-### Optional fields
+Optional fields on `BaseError`:
 
 ```go
 err := lokerr.New("Payment declined.", "payment_declined")
@@ -32,27 +44,88 @@ err.Namespace = "payments"
 err.Type = "https://example.com/errors/payments/payment_declined"
 ```
 
-### Checking errors
+## Custom error types
+
+When an error needs extra fields on the wire, embed `*lokerr.BaseError` and add your own exported fields. `lokerpc` serializes the concrete type directly, so the promoted `BaseError` fields and your custom fields all appear at the top level.
 
 ```go
-// Type-assert from any error in the chain
+type ValidationError struct {
+    *lokerr.BaseError
+    Field string `json:"field"`
+}
+
+func NewValidationError(field string) *ValidationError {
+    return &ValidationError{
+        BaseError: lokerr.New("Validation failed.", "validation_failed"),
+        Field:       field,
+    }
+}
+```
+
+Wire output:
+
+```json
+{"message":"Validation failed.","code":"validation_failed","expose":true,"field":"email"}
+```
+
+The same pattern works for any additional context — amounts, limits, resource IDs — just add exported fields with JSON tags.
+
+## Reusable error definitions
+
+Define constructor functions that fix the stable fields and accept only what varies per call:
+
+```go
+const typePrefix = "https://example.com/errors/payments/"
+
+func ErrPaymentDeclined() *lokerr.BaseError {
+    e := lokerr.New("Your payment was declined.", "payment_declined")
+    e.Namespace = "payments"
+    e.Type = typePrefix + "payment_declined"
+    return e
+}
+
+func ErrDBQuery(err error) *lokerr.BaseError {
+    return lokerr.WrapPublic(err, "db_query_failed", "Something went wrong.")
+}
+```
+
+To support `errors.Is` matching, wrap a package-level sentinel:
+
+```go
+var ErrInsufficientFunds = errors.New("insufficient funds")
+
+func NewInsufficientFundsError() *lokerr.BaseError {
+    e := lokerr.WrapPublic(ErrInsufficientFunds, "insufficient_funds", "Insufficient funds.")
+    e.Namespace = "payments"
+    return e
+}
+
+// Caller:
+if errors.Is(err, ErrInsufficientFunds) { ... }
+```
+
+Note: the wrapped sentinel is never serialized — it is only present server-side before the error crosses the wire.
+
+## Helper functions
+
+```go
+// Extract the lokerr.Error interface from any error in the chain
 if lErr, ok := lokerr.As(err); ok {
     fmt.Println(lErr.ErrorCode())
 }
 
-// Check if safe to show to end users
+// Check expose flag without a type assertion
 if lokerr.IsPublic(err) {
-    respondWithMessage(w, err.Error())
+    respondToUser(w, err.Error())
 }
 
-// Standard Go error chain
-errors.Is(err, sentinel)
-errors.As(err, &target)
+// Extract code from any error (returns "" if not a lokerr.Error)
+code := lokerr.ErrorCode(err)
 ```
 
 ## Wire format
 
-Errors serialize to JSON compatible with `@loke/errors`:
+`BaseError` serializes to JSON compatible with `@loke/errors`:
 
 ```json
 {
@@ -66,109 +139,10 @@ Errors serialize to JSON compatible with `@loke/errors`:
 
 - `expose` is omitted when `false`
 - `code`, `namespace`, `type` are omitted when empty
+- Custom types serialize their own exported fields alongside or instead of these
 
-## Public vs private errors
+## lokerpc integration
 
-| Constructor | `expose` | Use case |
-|---|---|---|
-| `New` / `Errorf` | `true` | User-facing validation errors, business rule violations |
-| `Wrap` | `false` | Internal failures (DB errors, network errors) — logged, not shown to users |
-| `WrapPublic` | `true` | Internal failure with a safe message to show the user |
+When a `lokerr.Error` is returned from an RPC handler, `lokerpc` serializes the concrete type in full at HTTP 400. Plain Go errors fall back to `{"message":"..."}` for backward compatibility.
 
-When a `lokerr.Error` reaches `lokerpc`, it is serialized in full (all fields) at HTTP 400. Plain Go errors produce `{"message":"..."}` for backward compatibility.
-
-## Reusable error types
-
-For errors that recur across a service, define constructor functions that pre-set the stable fields (`code`, `namespace`, `type`, `expose`) and accept only what varies at call time.
-
-```go
-const typePrefix = "https://example.com/errors/payments/"
-
-func ErrPaymentDeclined() *lokerr.Error {
-    e := lokerr.New("Your payment was declined.", "payment_declined")
-    e.Namespace = "payments"
-    e.Type = typePrefix + "payment_declined"
-    return e
-}
-
-func ErrDBQuery(err error) *lokerr.Error {
-    return lokerr.WrapPublic(err, "db_query_failed", "Something went wrong.")
-}
-```
-
-### Matching reusable error types
-
-Match on `ErrorCode()` or wrap a package-level sentinel for `errors.Is` support:
-
-```go
-// Match by code
-if lErr, ok := lokerr.As(err); ok {
-    switch lErr.ErrorCode() {
-    case "payment_declined":
-        // handle
-    }
-}
-
-// Or wrap a sentinel so errors.Is works
-var ErrPaymentDeclined = errors.New("payment declined")
-
-func NewPaymentDeclinedError() *lokerr.Error {
-    e := lokerr.WrapPublic(ErrPaymentDeclined, "payment_declined", "Your payment was declined.")
-    e.Namespace = "payments"
-    return e
-}
-
-if errors.Is(err, ErrPaymentDeclined) { ... }
-```
-
-Note: the wrapped sentinel is never serialized — it is only present server-side before the error crosses the wire.
-
-## Extending the error type
-
-`lokerr.Error` is intentionally minimal. If a specific situation calls for extra fields (correlation IDs, structured metadata), embed it in your own type — the standard JSON encoder will merge the fields automatically.
-
-### Adding a correlation ID
-
-```go
-type TracedError struct {
-    *lokerr.Error
-    RequestID string `json:"requestId,omitempty"`
-}
-
-// Wire format: {"message":"...","code":"...","requestId":"abc123"}
-func NewTracedError(msg, code, requestID string) *TracedError {
-    return &TracedError{
-        Error:     lokerr.New(msg, code),
-        RequestID: requestID,
-    }
-}
-```
-
-### Adding typed metadata
-
-Rather than a generic map, define explicit fields so the wire format stays self-documenting:
-
-```go
-type ValidationError struct {
-    *lokerr.Error
-    Field  string `json:"field"`
-    Reason string `json:"reason,omitempty"`
-}
-
-// Wire format: {"message":"...","code":"validation_failed","field":"email","reason":"invalid format"}
-func NewValidationError(field, reason string) *ValidationError {
-    return &ValidationError{
-        Error:  lokerr.New("Validation failed.", "validation_failed"),
-        Field:  field,
-        Reason: reason,
-    }
-}
-```
-
-`lokerr.As` still works on embedded types since `*lokerr.Error` is in the chain:
-
-```go
-if lErr, ok := lokerr.As(err); ok {
-    // lErr is the embedded *lokerr.Error
-}
-```
+On the client side, error responses are deserialized into `*lokerr.BaseError`, giving access to `Public()`, `ErrorCode()`, and `Error()`.

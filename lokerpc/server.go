@@ -433,7 +433,7 @@ func makeHandler(logger log.Logger, ec EndpointCodec) http.HandlerFunc {
 			logErr("err", failed)
 
 			status = http.StatusBadRequest
-			if lErr, ok := lokerr.As(failed); ok {
+			if lErr, ok := failed.(lokerr.Error); ok {
 				result = lErr
 			} else {
 				result = struct {

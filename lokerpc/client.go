@@ -79,7 +79,7 @@ func (c Client) DoRequest(ctx context.Context, method string, args, result any) 
 	case http.StatusNotFound:
 		return fmt.Errorf("Error rpc method not found: %v", url)
 	default:
-		lErr := &lokerr.Error{}
+		lErr := &lokerr.BaseError{}
 		if jsonErr := json.NewDecoder(res.Body).Decode(lErr); jsonErr != nil {
 			return fmt.Errorf("Error decoding rpc error response: %v", jsonErr)
 		}

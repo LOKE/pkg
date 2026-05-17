@@ -66,9 +66,9 @@ func TestErrorChain(t *testing.T) {
 		t.Error("errors.Is must find sentinel through wrapped chain")
 	}
 
-	var lErr *lokerr.Error
+	var lErr *lokerr.BaseError
 	if !errors.As(wrapped, &lErr) {
-		t.Error("errors.As must find *lokerr.Error")
+		t.Error("errors.As must find *lokerr.BaseError")
 	}
 
 	if errors.Unwrap(wrapped) != sentinel {
@@ -100,7 +100,7 @@ func TestHelpers(t *testing.T) {
 
 	e, ok := lokerr.As(pub)
 	if !ok || e == nil {
-		t.Error("As must find *Error for lokerr.New result")
+		t.Error("As must find lokerr.Error for lokerr.New result")
 	}
 
 	_, ok = lokerr.As(plain)
@@ -116,5 +116,49 @@ func TestHelpers(t *testing.T) {
 	}
 	if lokerr.IsPublic(plain) {
 		t.Error("IsPublic must return false for plain errors")
+	}
+
+	if lokerr.ErrorCode(pub) != "code" {
+		t.Errorf("ErrorCode = %v, want code", lokerr.ErrorCode(pub))
+	}
+	if lokerr.ErrorCode(plain) != "" {
+		t.Errorf("ErrorCode on plain error = %v, want empty", lokerr.ErrorCode(plain))
+	}
+}
+
+// customError demonstrates a user-defined type implementing lokerr.Error.
+type customError struct {
+	msg   string
+	code  string
+	Field string `json:"field"`
+}
+
+func (e *customError) Error() string     { return e.msg }
+func (e *customError) Public() bool      { return true }
+func (e *customError) ErrorCode() string { return e.code }
+
+func TestCustomTypeImplementsInterface(t *testing.T) {
+	err := &customError{msg: "field required", code: "required", Field: "email"}
+
+	var _ lokerr.Error = err // compile-time interface check
+
+	if !lokerr.IsPublic(err) {
+		t.Error("IsPublic must return true for custom public error")
+	}
+	if lokerr.ErrorCode(err) != "required" {
+		t.Errorf("ErrorCode = %v, want required", lokerr.ErrorCode(err))
+	}
+
+	// Custom field must serialize correctly
+	b, marshalErr := json.Marshal(err)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	var got map[string]any
+	if jsonErr := json.Unmarshal(b, &got); jsonErr != nil {
+		t.Fatal(jsonErr)
+	}
+	if got["field"] != "email" {
+		t.Errorf("field = %v, want email", got["field"])
 	}
 }
