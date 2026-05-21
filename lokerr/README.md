@@ -26,9 +26,6 @@ import "github.com/LOKE/pkg/lokerr"
 // Public error — expose: true, safe to show in a UI
 err := lokerr.New("The value provided was null.", "null_value")
 
-// Public error with formatted message
-err := lokerr.Errorf("validation_failed", "field %q is required", "email")
-
 // Internal error — expose: false, logged but not shown to users
 err := lokerr.Wrap(dbErr, "db_query_failed")
 

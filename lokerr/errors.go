@@ -2,7 +2,6 @@ package lokerr
 
 import (
 	"errors"
-	"fmt"
 )
 
 // Error is the interface for structured, serializable RPC errors.
@@ -54,11 +53,6 @@ func (e *BaseError) Unwrap() error     { return e.wrapped }
 // New creates a public BaseError (Expose=true).
 func New(msg, code string) *BaseError {
 	return &BaseError{Message: msg, Code: code, Expose: true}
-}
-
-// Errorf creates a public BaseError with a formatted message.
-func Errorf(code, format string, args ...any) *BaseError {
-	return &BaseError{Message: fmt.Sprintf(format, args...), Code: code, Expose: true}
 }
 
 // Wrap wraps an internal error as a non-public BaseError (Expose=false).
