@@ -1,4 +1,4 @@
-package unleash
+package featureflags
 
 type MockClient struct {
 	IsEnabledFunc func(name string, ctx Context) bool

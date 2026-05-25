@@ -3,6 +3,7 @@ module github.com/LOKE/pkg
 go 1.21
 
 require (
+	github.com/Unleash/unleash-go-sdk/v5 v5.0.3
 	github.com/go-kit/log v0.2.1
 	github.com/google/go-cmp v0.5.8
 	github.com/jsontypedef/json-typedef-go v0.0.0-20200503043955-4280071bd745
@@ -11,7 +12,6 @@ require (
 
 require (
 	github.com/Masterminds/semver/v3 v3.3.1 // indirect
-	github.com/Unleash/unleash-go-sdk/v5 v5.0.3 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect

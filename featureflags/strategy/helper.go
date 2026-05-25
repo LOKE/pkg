@@ -1,6 +1,9 @@
 package strategy
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 func IDsFromString(s string) []string {
 	parts := strings.Split(s, ",")
@@ -14,12 +17,7 @@ func IDsFromString(s string) []string {
 }
 
 func containsID(raw string, id string) bool {
-	for _, candidate := range IDsFromString(raw) {
-		if candidate == id {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(IDsFromString(raw), id)
 }
 
 func stringParam(params map[string]any, key string) string {
