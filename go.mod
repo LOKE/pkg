@@ -1,11 +1,11 @@
 module github.com/LOKE/pkg
 
-go 1.21
+go 1.23
 
 require (
 	github.com/Unleash/unleash-go-sdk/v5 v5.0.3
 	github.com/go-kit/log v0.2.1
-	github.com/google/go-cmp v0.5.8
+	github.com/google/go-cmp v0.7.0
 	github.com/jsontypedef/json-typedef-go v0.0.0-20200503043955-4280071bd745
 	github.com/prometheus/client_golang v1.12.2
 )
@@ -26,7 +26,7 @@ require (
 	github.com/stretchr/testify v1.10.0 // indirect
 	github.com/twmb/murmur3 v1.1.8 // indirect
 	golang.org/x/sys v0.0.0-20220731174439-a90be440212d // indirect
-	google.golang.org/protobuf v1.28.1 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
