@@ -12,19 +12,20 @@ type Error interface {
 	ErrorCode() string
 }
 
-// ErrorCode returns the error code of err if it implements ErrorCode(), otherwise "".
+// ErrorCode returns the error code of the first error in err's chain that implements ErrorCode(), otherwise "".
 func ErrorCode(err error) string {
 	type coder interface{ ErrorCode() string }
-	if e, ok := err.(coder); ok {
+	var e coder
+	if errors.As(err, &e) {
 		return e.ErrorCode()
 	}
 	return ""
 }
 
-// IsPublic reports whether err implements lokerr.Error and is marked as public.
+// IsPublic reports whether any error in err's chain implements lokerr.Error and is marked as public.
 func IsPublic(err error) bool {
-	e, ok := err.(Error)
-	return ok && e.Public()
+	var e Error
+	return errors.As(err, &e) && e.Public()
 }
 
 // As returns the first lokerr.Error in err's chain, if any.
