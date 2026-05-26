@@ -48,8 +48,12 @@ func (c client) Close() error {
 }
 
 func (c client) WaitForReady(ctx context.Context) error {
-	c.client.WaitForReady()
-	return nil
+	select {
+	case <-c.client.Ready():
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 type DisabledClient struct{}
