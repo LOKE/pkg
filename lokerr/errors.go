@@ -14,9 +14,11 @@ type Error interface {
 
 // ErrorCode returns the error code of the first error in err's chain that implements ErrorCode(), otherwise "".
 func ErrorCode(err error) string {
-	type coder interface{ ErrorCode() string }
-	var e coder
-	if errors.As(err, &e) {
+	type coder interface {
+		error
+		ErrorCode() string
+	}
+	if e, ok := errors.AsType[coder](err); ok {
 		return e.ErrorCode()
 	}
 	return ""
@@ -24,15 +26,15 @@ func ErrorCode(err error) string {
 
 // IsPublic reports whether any error in err's chain implements lokerr.Error and is marked as public.
 func IsPublic(err error) bool {
-	var e Error
-	return errors.As(err, &e) && e.Public()
+	if e, ok := errors.AsType[Error](err); ok {
+		return e.Public()
+	}
+	return false
 }
 
 // As returns the first lokerr.Error in err's chain, if any.
 func As(err error) (Error, bool) {
-	var e Error
-	ok := errors.As(err, &e)
-	return e, ok
+	return errors.AsType[Error](err)
 }
 
 // BaseError is a convenience type implementing Error.
