@@ -12,9 +12,5 @@ func (UserWithEmail) IsEnabled(params map[string]any, ctx *context.Context) bool
 	if ctx == nil {
 		return false
 	}
-	email := contextProperty(ctx.Properties, "email")
-	if email == "" {
-		return false
-	}
-	return containsID(stringParam(params, "emails"), email)
+	return contextHasID(ctx.Properties, "email", stringParam(params, "emails"))
 }

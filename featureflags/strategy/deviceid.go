@@ -12,9 +12,5 @@ func (DeviceID) IsEnabled(params map[string]any, ctx *context.Context) bool {
 	if ctx == nil {
 		return false
 	}
-	deviceID := contextProperty(ctx.Properties, "deviceId")
-	if deviceID == "" {
-		return false
-	}
-	return containsID(stringParam(params, "deviceIds"), deviceID)
+	return contextHasID(ctx.Properties, "deviceId", stringParam(params, "deviceIds"))
 }

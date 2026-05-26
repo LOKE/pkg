@@ -1,6 +1,6 @@
 module github.com/LOKE/pkg
 
-go 1.23
+go 1.26
 
 require (
 	github.com/Unleash/unleash-go-sdk/v5 v5.0.3

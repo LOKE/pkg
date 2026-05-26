@@ -12,9 +12,5 @@ func (ClientWithID) IsEnabled(params map[string]any, ctx *context.Context) bool 
 	if ctx == nil {
 		return false
 	}
-	clientID := contextProperty(ctx.Properties, "clientId")
-	if clientID == "" {
-		return false
-	}
-	return containsID(stringParam(params, "clientIds"), clientID)
+	return contextHasID(ctx.Properties, "clientId", stringParam(params, "clientIds"))
 }

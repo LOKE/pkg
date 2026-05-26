@@ -18,10 +18,7 @@ func (Timestamp) IsEnabled(params map[string]any, _ *context.Context) bool {
 		return false
 	}
 
-	t, err := time.Parse(time.RFC3339, enableAfter)
-	if err != nil {
-		t, err = time.Parse(time.RFC3339Nano, enableAfter)
-	}
+	t, err := time.Parse(time.RFC3339Nano, enableAfter)
 	if err != nil {
 		return false
 	}

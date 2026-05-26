@@ -12,9 +12,5 @@ func (OrgWithID) IsEnabled(params map[string]any, ctx *context.Context) bool {
 	if ctx == nil {
 		return false
 	}
-	orgID := contextProperty(ctx.Properties, "orgId")
-	if orgID == "" {
-		return false
-	}
-	return containsID(stringParam(params, "orgIds"), orgID)
+	return contextHasID(ctx.Properties, "orgId", stringParam(params, "orgIds"))
 }

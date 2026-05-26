@@ -12,9 +12,5 @@ func (LocationWithID) IsEnabled(params map[string]any, ctx *context.Context) boo
 	if ctx == nil {
 		return false
 	}
-	locationID := contextProperty(ctx.Properties, "locationId")
-	if locationID == "" {
-		return false
-	}
-	return containsID(stringParam(params, "locationIds"), locationID)
+	return contextHasID(ctx.Properties, "locationId", stringParam(params, "locationIds"))
 }

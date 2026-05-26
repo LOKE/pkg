@@ -34,3 +34,11 @@ func contextProperty(ctxProperties map[string]string, key string) string {
 	}
 	return ctxProperties[key]
 }
+
+func contextHasID(ctxProperties map[string]string, key string, ids string) bool {
+	property := contextProperty(ctxProperties, key)
+	if property == "" {
+		return false
+	}
+	return containsID(ids, property)
+}
