@@ -20,7 +20,7 @@ func newClientWithClient(baseURL string, client *http.Client) Client {
 }
 
 // NOTE: Maybe this should be exported, leaving it for now -- Dom
-// Could also keep make this a map[string]any for passing through arbitrary fields
+// Could also make this a map[string]any for passing through arbitrary fields
 // to the upstream caller
 type rpcClientError struct {
 	Message   string `json:"message"`
