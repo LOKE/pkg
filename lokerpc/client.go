@@ -20,13 +20,15 @@ func newClientWithClient(baseURL string, client *http.Client) Client {
 }
 
 // NOTE: Maybe this should be exported, leaving it for now -- Dom
+// Could also make this a map[string]any for passing through arbitrary fields
+// to the upstream caller
 type rpcClientError struct {
-	Message   string
-	Instance  string
-	Expose    bool
-	Code      string
-	Namespace string
-	Type      string
+	Message   string `json:"message"`
+	Instance  string `json:"instance,omitempty"`
+	Expose    bool   `json:"expose,omitempty"`
+	Code      string `json:"code,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+	Type      string `json:"type,omitempty"`
 }
 
 func (e *rpcClientError) ErrorID() string {
