@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/LOKE/pkg/errors"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	jtd "github.com/jsontypedef/json-typedef-go"
@@ -431,9 +432,7 @@ func makeHandler(logger log.Logger, ec EndpointCodec) http.HandlerFunc {
 			logErr("err", e.Failed())
 
 			status = http.StatusBadRequest
-			result = struct {
-				Message string `json:"message"`
-			}{e.Failed().Error()}
+			result = formatErrResult(e.Failed())
 		} else {
 			if r, ok := result.(Resulter); ok {
 				result = r.Result()
@@ -457,4 +456,34 @@ func makeHandler(logger log.Logger, ec EndpointCodec) http.HandlerFunc {
 
 func writeBadReq(w http.ResponseWriter, format string, a ...interface{}) {
 	http.Error(w, fmt.Sprintf(format+"\n", a...), http.StatusBadRequest)
+}
+
+func formatErrResult(err error) any {
+	// If the error is an upstream error, just return it as-is
+	//
+	// Note we are intentionally not using errors.Is, we want to return the
+	// outer most error
+	if rpcErr, ok := err.(*rpcClientError); ok {
+		return rpcErr
+	}
+
+	// TODO: Support custom error attributes. If the error implements
+	// `MarshalJSON` we may want to call that, Ideally we would have a
+	// `ErrorAttributes() map[string]any`, but go's JSON encoding makes it hard
+	// to flatten them onto struct fields
+
+	// This is the minimum viable error result for LOKE rpc clients
+	errResult := struct {
+		Message string `json:"message"`
+		Expose  bool   `json:"expose,omitempty"`
+		Code    string `json:"code,omitempty"`
+		Type    string `json:"type,omitempty"`
+	}{
+		err.Error(),
+		errors.IsPublic(err),
+		errors.ErrorCode(err),
+		errors.ErrorType(err),
+	}
+
+	return errResult
 }
