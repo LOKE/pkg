@@ -53,7 +53,7 @@ func TestMountHandlers(t *testing.T) {
 			wantStatus: 400,
 		},
 		{
-			name: "upstream rpc error",
+			name: "upstream rpc error, expose true",
 			req:  httptest.NewRequest("POST", "/rpc/service1/basic", strings.NewReader(`{}`)),
 			endpointCoded: MakeStandardEndpointCodec(func(ctx context.Context, req struct{}) (*struct{}, error) {
 				return nil, &rpcClientError{
@@ -66,6 +66,22 @@ func TestMountHandlers(t *testing.T) {
 				}
 			}, ""),
 			wantBody:   `{"message":"some error","instance":"123","expose":true,"code":"bar","namespace":"foo","type":"https://example.com/errors/foo/bar"}`,
+			wantStatus: 400,
+		},
+		{
+			name: "upstream rpc error, expose false",
+			req:  httptest.NewRequest("POST", "/rpc/service1/basic", strings.NewReader(`{}`)),
+			endpointCoded: MakeStandardEndpointCodec(func(ctx context.Context, req struct{}) (*struct{}, error) {
+				return nil, &rpcClientError{
+					Message:   "some error",
+					Instance:  "123",
+					Expose:    false,
+					Code:      "bar",
+					Type:      "https://example.com/errors/foo/bar",
+					Namespace: "foo",
+				}
+			}, ""),
+			wantBody:   `{"message":"some error","instance":"123","code":"bar","namespace":"foo","type":"https://example.com/errors/foo/bar"}`,
 			wantStatus: 400,
 		},
 	}
