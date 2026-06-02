@@ -1,0 +1,28 @@
+{
+  "serviceName": "payment",
+  "help": "Payment service",
+  "multiArg": false,
+  "definitions": {
+    "Currency": {
+      "enum": ["AUD", "NZD", "USD", "GBP", "SGD"]
+    },
+    "PaymentState": {
+      "enum": ["created", "authorized", "submitted", "settled", "failed", "canceled", "refunded", "completed"]
+    }
+  },
+  "interfaces": [
+    {
+      "help": "Get payment state",
+      "methodName": "getState",
+      "methodTimeout": 30000,
+      "paramNames": [],
+      "requestTypeDef": {
+        "properties": {
+          "currency": {"ref": "Currency"},
+          "amount": {"type": "int32"}
+        }
+      },
+      "responseTypeDef": {"ref": "PaymentState"}
+    }
+  ]
+}

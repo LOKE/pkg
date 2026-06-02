@@ -93,6 +93,19 @@ func TypeSchema(t reflect.Type, tdefs map[reflect.Type]*NamedSchema) *jtd.Schema
 		schema.Values = vals
 		schema.Nullable = true
 	case reflect.String:
+		if t.Name() != "" {
+			if values, ok := EnumValuesFor(t); ok {
+				if _, exists := tdefs[t]; !exists {
+					name := t.Name()
+					tdefs[t] = &NamedSchema{
+						Name:    name,
+						SortKey: fmt.Sprintf("%s.%s", t.PkgPath(), name),
+						Schema:  jtd.Schema{Enum: values},
+					}
+				}
+				return &jtd.Schema{Ref: &tdefs[t].Name}
+			}
+		}
 		schema.Type = jtd.TypeString
 	case reflect.Int:
 		schema.Type = jtd.TypeInt32

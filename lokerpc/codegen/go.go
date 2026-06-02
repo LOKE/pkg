@@ -120,8 +120,25 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 	var b bytes.Buffer
 
 	for _, k := range defOrder {
+		def := meta.Definitions[k]
 		b.WriteString("\n")
-		fmt.Fprintf(&b, "type %s %s;\n", goFieldName(k), GenGoType(meta.Definitions[k], imports))
+		if def.Form() == jtd.FormEnum {
+			typeName := goFieldName(k)
+			fmt.Fprintf(&b, "type %s string\n", typeName)
+			if len(def.Enum) > 0 {
+				b.WriteString("\nconst (\n")
+				for _, v := range def.Enum {
+					suffix := goFieldName(v)
+					if suffix == "" {
+						continue
+					}
+					fmt.Fprintf(&b, "\t%s%s %s = %q\n", typeName, suffix, typeName, v)
+				}
+				b.WriteString(")\n")
+			}
+		} else {
+			fmt.Fprintf(&b, "type %s %s\n", goFieldName(k), GenGoType(def, imports))
+		}
 	}
 
 	// Service interface
