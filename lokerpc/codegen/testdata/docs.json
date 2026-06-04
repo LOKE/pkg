@@ -1,0 +1,52 @@
+{
+  "serviceName": "docs-test",
+  "help": "A service for testing doc comments",
+  "multiArg": false,
+  "interfaces": [
+    {
+      "methodName": "getUser",
+      "paramNames": ["req"],
+      "methodTimeout": 60000,
+      "help": "Get a user by ID",
+      "requestTypeDef": {"ref": "GetUserRequest"},
+      "responseTypeDef": {"ref": "User"}
+    }
+  ],
+  "definitions": {
+    "GetUserRequest": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      }
+    },
+    "User": {
+      "properties": {
+        "id": {"type": "string"},
+        "name": {
+          "type": "string"
+        }
+      },
+      "optionalProperties": {
+        "email": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "definitionDocs": {
+    "GetUserRequest": {
+      "help": "GetUserRequest is the request type for GetUser.",
+      "fields": {
+        "id": "The unique identifier of the user."
+      }
+    },
+    "User": {
+      "help": "User represents a user account.",
+      "fields": {
+        "name": "The display name of the user.",
+        "email": "Email address. Optional."
+      }
+    }
+  }
+}

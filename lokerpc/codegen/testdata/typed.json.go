@@ -17,6 +17,7 @@ type GetUserRequest struct {
 }
 
 type TypedService interface {
+	// hello1 method
 	GetUser(context.Context, GetUserRequest) (*User, error)
 }
 

@@ -6,10 +6,13 @@ import (
 	"github.com/LOKE/pkg/lokerpc"
 )
 
+// hello
 type Service1Service interface {
+	// hello1 method
 	Hello1(context.Context, any) (any, error)
 }
 
+// hello
 type Service1RPCClient struct {
 	lokerpc.Client
 }

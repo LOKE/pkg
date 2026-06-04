@@ -6,6 +6,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	jtd "github.com/jsontypedef/json-typedef-go"
 )
 
@@ -158,4 +160,54 @@ func TypeDefs(tdefs map[reflect.Type]*NamedSchema) map[string]jtd.Schema {
 	}
 
 	return defs
+}
+
+// EnrichWithDocs walks the named schema map and returns a map of type
+// documentation keyed by resolved schema name. Must be called after TypeDefs
+// so that ns.Name is finalised. Best-effort: errors are logged but never fail
+// server startup.
+func EnrichWithDocs(tdefs map[reflect.Type]*NamedSchema, logger log.Logger) map[string]DefinitionDoc {
+	result := map[string]DefinitionDoc{}
+	var skipped int
+	for t, ns := range tdefs {
+		if t.Kind() != reflect.Struct {
+			continue
+		}
+
+		// Fast path: pre-registered docs (production builds via gendocs tool).
+		if rd, ok := lookupRegisteredDocs(t.PkgPath(), t.Name()); ok {
+			if rd.Doc != "" || len(rd.Fields) > 0 {
+				result[ns.Name] = DefinitionDoc{Help: rd.Doc, Fields: rd.Fields}
+			}
+			continue
+		}
+
+		// Slow path: runtime AST parsing (dev builds where source is on disk).
+		dir, err := pkgSourceDir(t.PkgPath())
+		if err != nil {
+			skipped++
+			continue
+		}
+
+		docs, err := loadPkgDocs(dir)
+		if err != nil {
+			level.Warn(logger).Log("msg", "failed to parse docs", "pkg", t.PkgPath(), "err", err)
+			skipped++
+			continue
+		}
+
+		td, ok := docs.types[t.Name()]
+		if !ok {
+			continue
+		}
+
+		if td.doc != "" || len(td.fields) > 0 {
+			result[ns.Name] = DefinitionDoc{Help: td.doc, Fields: td.fields}
+		}
+	}
+
+	if skipped > 0 {
+		level.Info(logger).Log("msg", "doc enrichment skipped (source unavailable)", "count", skipped)
+	}
+	return result
 }

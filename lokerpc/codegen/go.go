@@ -11,12 +11,14 @@ import (
 	jtd "github.com/jsontypedef/json-typedef-go"
 )
 
-func GenGoType(schema jtd.Schema, imports map[string]struct{}) string {
+// GenGoType converts a JTD schema to a Go type string.
+// fieldDocs maps JSON field names to doc strings; pass nil when not at a named type boundary.
+func GenGoType(schema jtd.Schema, imports map[string]struct{}, fieldDocs map[string]string) string {
 	var t string
 
 	for k, v := range schema.Definitions {
 		t += "\n"
-		t += "type " + goFieldName(k) + " " + GenGoType(v, imports) + "\n"
+		t += "type " + goFieldName(k) + " " + GenGoType(v, imports, nil) + "\n"
 	}
 
 	switch schema.Form() {
@@ -49,16 +51,28 @@ func GenGoType(schema jtd.Schema, imports map[string]struct{}) string {
 			t += "bool"
 		}
 	case jtd.FormElements:
-		t += "[]" + GenGoType(*schema.Elements, imports)
+		t += "[]" + GenGoType(*schema.Elements, imports, nil)
 	case jtd.FormValues:
-		t += "map[string]" + GenGoType(*schema.Values, imports)
+		t += "map[string]" + GenGoType(*schema.Values, imports, nil)
 	case jtd.FormProperties:
 		t += "struct {\n"
 		for _, k := range sortedKeys(schema.Properties) {
-			t += "\t" + goFieldName(k) + " " + GenGoType(schema.Properties[k], imports) + "`json:\"" + k + "\"`\n"
+			prop := schema.Properties[k]
+			if desc := fieldDocs[k]; desc != "" {
+				for _, line := range strings.Split(strings.TrimSpace(desc), "\n") {
+					t += "\t// " + strings.TrimSpace(line) + "\n"
+				}
+			}
+			t += "\t" + goFieldName(k) + " " + GenGoType(prop, imports, nil) + "`json:\"" + k + "\"`\n"
 		}
 		for _, k := range sortedKeys(schema.OptionalProperties) {
-			t += "\t" + goFieldName(k) + " " + GenGoType(schema.OptionalProperties[k], imports) + "`json:\"" + k + ",omitempty\"`\n"
+			prop := schema.OptionalProperties[k]
+			if desc := fieldDocs[k]; desc != "" {
+				for _, line := range strings.Split(strings.TrimSpace(desc), "\n") {
+					t += "\t// " + strings.TrimSpace(line) + "\n"
+				}
+			}
+			t += "\t" + goFieldName(k) + " " + GenGoType(prop, imports, nil) + "`json:\"" + k + ",omitempty\"`\n"
 		}
 		t += "}"
 	case jtd.FormDiscriminator:
@@ -89,7 +103,7 @@ type resolvedMethod struct {
 func resolveMethodTypes(v lokerpc.EndpointMeta, imports map[string]struct{}) resolvedMethod {
 	reqType := "any"
 	if v.RequestTypeDef != nil {
-		reqType = GenGoType(*v.RequestTypeDef, imports)
+		reqType = GenGoType(*v.RequestTypeDef, imports, nil)
 	}
 
 	resType := "any"
@@ -99,7 +113,7 @@ func resolveMethodTypes(v lokerpc.EndpointMeta, imports map[string]struct{}) res
 			isVoid = true
 			resType = ""
 		} else {
-			resType = GenGoType(*v.ResponseTypeDef, imports)
+			resType = GenGoType(*v.ResponseTypeDef, imports, nil)
 
 			if !strings.HasPrefix(resType, "[]") && !strings.HasPrefix(resType, "map[") && !strings.HasPrefix(resType, "*") {
 				resType = "*" + resType
@@ -121,17 +135,21 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 
 	for _, k := range defOrder {
 		b.WriteString("\n")
-		fmt.Fprintf(&b, "type %s %s;\n", goFieldName(k), GenGoType(meta.Definitions[k], imports))
+		doc := meta.DefinitionDocs[k]
+		if doc.Help != "" {
+			goDocComment(&b, doc.Help, "")
+		}
+		fmt.Fprintf(&b, "type %s %s;\n", goFieldName(k), GenGoType(meta.Definitions[k], imports, doc.Fields))
 	}
 
 	// Service interface
 	b.WriteString("\n")
-	// goDocComment(b, meta.Help, "")
+	goDocComment(&b, meta.Help, "")
 	b.WriteString("type " + goFieldName(meta.ServiceName) + "Service interface {\n")
 	for _, v := range meta.Interfaces {
 		m := resolveMethodTypes(v, imports)
 
-		// goDocComment(b, v.Help, "\t")
+		goDocComment(&b, v.Help, "\t")
 		if m.isVoid {
 			fmt.Fprintf(&b, "\t%s(context.Context, %s) error\n", goFieldName(v.MethodName), m.reqType)
 		} else {
@@ -142,7 +160,7 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 
 	// Service client implementation
 	b.WriteString("\n")
-	// goDocComment(b, meta.Help, "")
+	goDocComment(&b, meta.Help, "")
 	b.WriteString("type " + goFieldName(meta.ServiceName) + "RPCClient struct{\nlokerpc.Client}\n\n")
 	for _, v := range meta.Interfaces {
 		m := resolveMethodTypes(v, imports)
@@ -199,6 +217,16 @@ var fieldRe = regexp.MustCompile(`[_\-\s]+([a-zA-Z0-9])`)
 var invalidCharRe = regexp.MustCompile(`[^a-zA-Z0-9_]`)
 
 var idRe = regexp.MustCompile(`Id$`)
+
+func goDocComment(w io.Writer, text string, indent string) {
+	if text == "" {
+		return
+	}
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	for _, l := range lines {
+		fmt.Fprintf(w, "%s// %s\n", indent, strings.TrimSpace(l))
+	}
+}
 
 func goFieldName(name string) string {
 	// Capitalize the first letter

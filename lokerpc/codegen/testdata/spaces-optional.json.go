@@ -15,10 +15,13 @@ type AccountMetadata struct {
 	LocationName     *string `json:"Location Name,omitempty"`
 }
 
+// Test service for AccountMetadata shape
 type StripePaymentsService interface {
+	// Fetch account metadata
 	GetAccountMetadata(context.Context, AccountMetadata) (*AccountMetadata, error)
 }
 
+// Test service for AccountMetadata shape
 type StripePaymentsRPCClient struct {
 	lokerpc.Client
 }

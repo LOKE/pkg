@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/LOKE/pkg/lokerpc"
 	jtd "github.com/jsontypedef/json-typedef-go"
 )
 
-func GenTypescriptType(schema jtd.Schema) string {
+// GenTypescriptType converts a JTD schema to a TypeScript type string.
+// fieldDocs maps JSON field names to doc strings; pass nil when not at a named type boundary.
+func GenTypescriptType(schema jtd.Schema, fieldDocs map[string]string) string {
 	var t string
 
 	// Check if metadata.union is present with refs - this overrides the normal form handling
@@ -50,19 +53,27 @@ func GenTypescriptType(schema jtd.Schema) string {
 		}
 	case jtd.FormElements:
 		if schema.Elements.Nullable || schema.Elements.Form() == jtd.FormEnum || schema.Elements.Form() == jtd.FormDiscriminator {
-			t += "(" + GenTypescriptType(*schema.Elements) + ")[]"
+			t += "(" + GenTypescriptType(*schema.Elements, nil) + ")[]"
 		} else {
-			t += GenTypescriptType(*schema.Elements) + "[]"
+			t += GenTypescriptType(*schema.Elements, nil) + "[]"
 		}
 	case jtd.FormValues:
-		t += "Record<string, " + GenTypescriptType(*schema.Values) + ">"
+		t += "Record<string, " + GenTypescriptType(*schema.Values, nil) + ">"
 	case jtd.FormProperties:
 		t += "{\n"
 		for _, k := range sortedKeys(schema.Properties) {
-			t += "  " + quoteFieldNames(k) + ": " + GenTypescriptType(schema.Properties[k]) + ";\n"
+			prop := schema.Properties[k]
+			if desc := fieldDocs[k]; desc != "" {
+				t += "  /** " + strings.TrimSpace(desc) + " */\n"
+			}
+			t += "  " + quoteFieldNames(k) + ": " + GenTypescriptType(prop, nil) + ";\n"
 		}
 		for _, k := range sortedKeys(schema.OptionalProperties) {
-			t += "  " + quoteFieldNames(k) + "?: " + GenTypescriptType(schema.OptionalProperties[k]) + ";\n"
+			prop := schema.OptionalProperties[k]
+			if desc := fieldDocs[k]; desc != "" {
+				t += "  /** " + strings.TrimSpace(desc) + " */\n"
+			}
+			t += "  " + quoteFieldNames(k) + "?: " + GenTypescriptType(prop, nil) + ";\n"
 		}
 		t += "}"
 	case jtd.FormDiscriminator:
@@ -74,7 +85,7 @@ func GenTypescriptType(schema jtd.Schema) string {
 			}
 			s.Properties[schema.Discriminator] = jtd.Schema{Enum: []string{k}}
 
-			t += "\n| " + GenTypescriptType(s)
+			t += "\n| " + GenTypescriptType(s, nil)
 		}
 	case jtd.FormEnum:
 		for i, v := range schema.Enum {
@@ -109,7 +120,11 @@ func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
 
 	for _, k := range defOrder {
 		b.WriteString("\n")
-		fmt.Fprintf(b, "export type %s = %s;\n", capitalize(k), GenTypescriptType(meta.Definitions[k]))
+		doc := meta.DefinitionDocs[k]
+		if doc.Help != "" {
+			tsDocComment(b, doc.Help, "")
+		}
+		fmt.Fprintf(b, "export type %s = %s;\n", capitalize(k), GenTypescriptType(meta.Definitions[k], doc.Fields))
 	}
 
 	b.WriteString("\n")
@@ -122,7 +137,7 @@ func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
 	for _, v := range meta.Interfaces {
 		reqType := "any"
 		if v.RequestTypeDef != nil {
-			reqType = GenTypescriptType(*v.RequestTypeDef)
+			reqType = GenTypescriptType(*v.RequestTypeDef, nil)
 		}
 
 		resType := "any"
@@ -130,7 +145,7 @@ func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
 			if v.ResponseTypeDef.Metadata["void"] == true {
 				resType = "void"
 			} else {
-				resType = GenTypescriptType(*v.ResponseTypeDef)
+				resType = GenTypescriptType(*v.ResponseTypeDef, nil)
 			}
 		}
 
@@ -145,6 +160,10 @@ func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
 }
 
 func normalise(meta *lokerpc.Meta) []string {
+	sort.Slice(meta.Interfaces, func(i, j int) bool {
+		return meta.Interfaces[i].MethodName < meta.Interfaces[j].MethodName
+	})
+
 	var defOrder []string
 
 	if meta.Definitions == nil {

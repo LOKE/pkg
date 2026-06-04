@@ -91,12 +91,19 @@ type EndpointCodec struct {
 // EndpointCodecMap maps the Request.Method to the proper EndpointCodec
 type EndpointCodecMap map[string]EndpointCodec
 
+// DefinitionDoc holds documentation for a named type and its fields.
+type DefinitionDoc struct {
+	Help   string            `json:"help,omitempty"`
+	Fields map[string]string `json:"fields,omitempty"`
+}
+
 type Meta struct {
-	ServiceName string                `json:"serviceName"`
-	MultiArg    bool                  `json:"multiArg"`
-	Help        string                `json:"help"`
-	Interfaces  []EndpointMeta        `json:"interfaces"`
-	Definitions map[string]jtd.Schema `json:"definitions,omitempty"`
+	ServiceName    string                   `json:"serviceName"`
+	MultiArg       bool                     `json:"multiArg"`
+	Help           string                   `json:"help"`
+	Interfaces     []EndpointMeta           `json:"interfaces"`
+	Definitions    map[string]jtd.Schema    `json:"definitions,omitempty"`
+	DefinitionDocs map[string]DefinitionDoc `json:"definitionDocs,omitempty"`
 }
 
 type EndpointMeta struct {
@@ -308,6 +315,7 @@ func MountHandlers(logger log.Logger, mux Mux, services ...*Service) {
 		}
 
 		meta.Definitions = TypeDefs(defs)
+		meta.DefinitionDocs = EnrichWithDocs(defs, logger)
 
 		// service meta endpoint
 		mux.Handle("/rpc/"+service.Name, newMetaHandler(meta))

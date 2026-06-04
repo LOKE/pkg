@@ -20,6 +20,7 @@ type GetUserResponse struct {
 }
 
 type NestedService interface {
+	// hello1 method
 	GetUser(context.Context, GetUserRequest) (*GetUserResponse, error)
 }
 
