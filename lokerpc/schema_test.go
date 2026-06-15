@@ -64,29 +64,6 @@ func TestEnumProviderIsValueReceiver(t *testing.T) {
 	}
 }
 
-func TestAuditEnumValidatorTags(t *testing.T) {
-	type good struct {
-		Currency testCurrency `json:"currency" validate:"enum"`
-	}
-	if errs := AuditEnumValidatorTags(reflect.TypeOf(good{})); len(errs) != 0 {
-		t.Errorf("tagged enum field should pass audit, got %v", errs)
-	}
-
-	type goodOptional struct {
-		Currency *testCurrency `json:"currency" validate:"omitempty,enum"`
-	}
-	if errs := AuditEnumValidatorTags(reflect.TypeOf(goodOptional{})); len(errs) != 0 {
-		t.Errorf("omitempty,enum field should pass audit, got %v", errs)
-	}
-
-	type bad struct {
-		Currency testCurrency `json:"currency"`
-	}
-	if errs := AuditEnumValidatorTags(reflect.TypeOf(bad{})); len(errs) != 1 {
-		t.Errorf("untagged enum field should yield 1 audit error, got %v", errs)
-	}
-}
-
 type jsonMarshaler struct{}
 
 func (jsonMarshaler) MarshalJSON() ([]byte, error) {

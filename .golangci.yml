@@ -1,0 +1,12 @@
+version: "2"
+
+linters:
+  # Only LOKE's own checks run here; enable more linters as the team sees fit.
+  default: none
+  enable:
+    - loke
+  settings:
+    custom:
+      loke:
+        type: module
+        description: 'LOKE checks: enumtag enforces validate:"enum" on enum-typed struct fields'

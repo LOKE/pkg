@@ -1,0 +1,15 @@
+# Builds a custom golangci-lint binary bundling LOKE's "loke" module plugin.
+#
+#   go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+#   golangci-lint custom            # produces ./bin/golangci-lint-loke
+#   ./bin/golangci-lint-loke run    # lints using .golangci.yml
+#
+# See lint/README.md.
+version: v2.12.2
+name: golangci-lint-loke
+destination: ./bin
+
+plugins:
+  - module: github.com/LOKE/pkg
+    import: github.com/LOKE/pkg/lint
+    path: .

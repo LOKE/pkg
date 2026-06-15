@@ -1,10 +1,6 @@
 package lokerpc
 
-import (
-	"fmt"
-	"reflect"
-	"strings"
-)
+import "reflect"
 
 // EnumProvider is implemented by a named string type to declare its permitted
 // values in one place, so schema generation and validation can resolve them by
@@ -23,6 +19,9 @@ import (
 //	func (Currency) EnumValues() []string {
 //	    return lokerpc.Enum(CurrencyAUD, CurrencyNZD, CurrencyUSD)
 //	}
+//
+// The enumtag analyzer (github.com/LOKE/pkg/lint) statically checks that struct
+// fields of an EnumProvider type carry a validate:"enum" rule.
 type EnumProvider interface {
 	EnumValues() []string
 }
@@ -59,63 +58,4 @@ func EnumValuesFor(t reflect.Type) (values []string, ok bool) {
 		return reflect.Zero(t).Interface().(EnumProvider).EnumValues(), true
 	}
 	return nil, false
-}
-
-// isEnumType reports whether t is a known enum (implements EnumProvider) without
-// materialising its values.
-func isEnumType(t reflect.Type) bool {
-	return t.Implements(enumProviderType)
-}
-
-// AuditEnumValidatorTags walks t's exported fields recursively and returns one
-// error per field whose type (after dereferencing pointers) is a known enum but
-// whose validate tag is missing the "enum" rule. Call it from a test over your
-// request types to guarantee enum fields are validated at runtime.
-func AuditEnumValidatorTags(t reflect.Type) []error {
-	return auditEnumTagsInto(t, map[reflect.Type]bool{})
-}
-
-func auditEnumTagsInto(t reflect.Type, visited map[reflect.Type]bool) []error {
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-	if visited[t] {
-		return nil
-	}
-	visited[t] = true
-	if t.Kind() != reflect.Struct {
-		return nil
-	}
-
-	var errs []error
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
-		if !f.IsExported() {
-			continue
-		}
-
-		ft := f.Type
-		for ft.Kind() == reflect.Pointer {
-			ft = ft.Elem()
-		}
-
-		if isEnumType(ft) && !hasEnumRule(f.Tag.Get("validate")) {
-			errs = append(errs, fmt.Errorf(
-				"%s.%s: %s is an enum type but validate tag lacks \"enum\" (got %q)",
-				t.Name(), f.Name, ft.Name(), f.Tag.Get("validate"),
-			))
-		}
-
-		errs = append(errs, auditEnumTagsInto(ft, visited)...)
-	}
-	return errs
-}
-
-func hasEnumRule(validateTag string) bool {
-	for _, part := range strings.Split(validateTag, ",") {
-		if strings.TrimSpace(part) == "enum" {
-			return true
-		}
-	}
-	return false
 }

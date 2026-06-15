@@ -91,30 +91,33 @@ Schemas are generated automatically from Go types during `MountHandlers`. No man
 | named struct | definition + `{ref: "Name"}` |
 | `MarshalText()` | `{type: "string"}` |
 | `MarshalJSON()` | `{}` (any) |
-| named string with a registered `EnumSet` | enum definition + `{ref: "Name"}` |
+| named string implementing `EnumProvider` | enum definition + `{ref: "Name"}` |
 
 ### Enums
 
-Declare a named string type's values once with an `EnumSet`. `NewEnumSet` registers the type, so schema generation resolves its values by reflection — **the type needs no method of its own**. Each value is declared on a single line, and every field of that type (requests and responses alike) references the same enum definition with no per-field tag:
+Declare a named string type's values as `const`s and have the type implement `EnumProvider` (`EnumValues() []string`, **value receiver**). Schema generation resolves the values by reflection, and every field of that type (requests and responses alike) references the same enum definition with no per-field tag:
 
 ```go
 type Currency string
 
-var currencies = lokerpc.NewEnumSet[Currency]()
-
-var (
-    CurrencyAUD = currencies.Add("AUD")
-    CurrencyNZD = currencies.Add("NZD")
-    CurrencyUSD = currencies.Add("USD")
+const (
+    CurrencyAUD Currency = "AUD"
+    CurrencyNZD Currency = "NZD"
+    CurrencyUSD Currency = "USD"
 )
 
+// lokerpc.Enum keeps the returned values in sync with the declared consts.
+func (Currency) EnumValues() []string {
+    return lokerpc.Enum(CurrencyAUD, CurrencyNZD, CurrencyUSD)
+}
+
 type CreatePaymentRequest struct {
-    Currency Currency `json:"currency"`
+    Currency Currency `json:"currency" validate:"enum"`
     Amount   int32    `json:"amount" validate:"required,gt=0"`
 }
 ```
 
-The values are package `var`s rather than `const`s (a method call can't initialise a const); they're used identically in switches and map keys.
+Use a value receiver: schema generation relies on `reflect.Zero(t).Interface().(EnumProvider)`, which a pointer receiver fails silently.
 
 This produces:
 
@@ -130,9 +133,7 @@ This produces:
 }
 ```
 
-If you'd rather keep `const`s, the type can instead implement `EnumProvider` (`EnumValues() []string`, value receiver) and return `lokerpc.Enum(CurrencyAUD, CurrencyNZD, CurrencyUSD)` — schema generation falls back to that when no `EnumSet` is registered.
-
-To enforce the values on incoming requests, register a custom `enum` validator that looks the field's type up with `lokerpc.EnumValuesFor(field.Type())`, and tag the field with `validate:"enum"`. `lokerpc.AuditEnumValidatorTags(reflect.TypeOf(MyRequest{}))` can be used in a test to assert every enum field on a request type carries the rule.
+To enforce the values on incoming requests, register a custom `enum` validator that looks the field's type up with `lokerpc.EnumValuesFor(field.Type())`, and tag the field with `validate:"enum"`. The [`loke` golangci-lint plugin](../lint) (`enumtag` analyzer) statically checks that every enum-typed struct field carries that rule.
 
 ---
 
@@ -238,7 +239,7 @@ If you need to generate schemas outside of `MountHandlers`:
 ```go
 tdefs := map[reflect.Type]*lokerpc.NamedSchema{}
 
-// Build schema — EnumProvider types are detected and registered automatically
+// Build schema — EnumProvider types are detected automatically by reflection
 schema := lokerpc.TypeSchema(reflect.TypeOf(MyRequest{}), tdefs)
 
 // Resolve definitions
