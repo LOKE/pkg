@@ -12,29 +12,17 @@ import (
 
 type testCurrency string
 
-var testCurrencies = NewEnumSet[testCurrency]()
-
-var (
-	testCurrencyAUD = testCurrencies.Add("AUD")
-	testCurrencyGBP = testCurrencies.Add("GBP")
-	testCurrencyNZD = testCurrencies.Add("NZD")
+const (
+	testCurrencyAUD testCurrency = "AUD"
+	testCurrencyGBP testCurrency = "GBP"
+	testCurrencyNZD testCurrency = "NZD"
 )
 
-func (testCurrency) EnumValues() []string { return testCurrencies.Values() }
+func (testCurrency) EnumValues() []string {
+	return Enum(testCurrencyAUD, testCurrencyGBP, testCurrencyNZD)
+}
 
-// regColor is registered via NewEnumSet and has NO EnumValues method — it
-// exercises the registry-only detection path.
-type regColor string
-
-var regColors = NewEnumSet[regColor]()
-
-var (
-	regColorRed  = regColors.Add("red")
-	regColorBlue = regColors.Add("blue")
-)
-
-// ifaceShade uses the EnumProvider interface only (no NewEnumSet) — it exercises
-// the interface fallback path.
+// ifaceShade is a second EnumProvider type, declared with consts.
 type ifaceShade string
 
 const (
@@ -52,59 +40,14 @@ func TestEnumHelper(t *testing.T) {
 	}
 }
 
-func TestEnumSet(t *testing.T) {
-	type color string
-	set := NewEnumSet[color]()
-	red := set.Add("red")
-	blue := set.Add("blue")
-
-	if red != "red" || blue != "blue" {
-		t.Fatalf("Add should return the value it recorded: red=%q blue=%q", red, blue)
-	}
-
-	want := []string{"red", "blue"}
-	if got := set.Values(); !reflect.DeepEqual(got, want) {
-		t.Errorf("Values() = %v, want %v", got, want)
-	}
-
-	// Values must return a fresh slice so callers can't corrupt the set.
-	got := set.Values()
-	got[0] = "mutated"
-	if set.Values()[0] != "red" {
-		t.Error("Values() should return a defensive copy")
-	}
-}
-
-func TestEnumSetRegistersWithoutMethod(t *testing.T) {
-	// Add returns the typed value, so the declared names are usable constants.
-	if regColorRed != "red" || regColorBlue != "blue" {
-		t.Fatalf("Add should return the typed value: red=%q blue=%q", regColorRed, regColorBlue)
-	}
-
-	// regColor has no EnumValues method; schema generation must still detect it
-	// via the registry that NewEnumSet populated.
-	tdefs := map[reflect.Type]*NamedSchema{}
-	got := TypeSchema(reflect.TypeOf(struct {
-		Color regColor `json:"color"`
-	}{}), tdefs)
-
-	ref := got.Properties["color"].Ref
-	if ref == nil || *ref != "regColor" {
-		t.Fatalf("expected color to ref the regColor enum, got %+v", got.Properties["color"])
-	}
-	if defs := TypeDefs(tdefs); !reflect.DeepEqual(defs["regColor"].Enum, []string{"red", "blue"}) {
-		t.Errorf("regColor enum = %v, want [red blue]", defs["regColor"].Enum)
-	}
-}
-
 func TestEnumValuesFor(t *testing.T) {
-	// Registry-backed type (declared via NewEnumSet, no method).
-	if vals, ok := EnumValuesFor(reflect.TypeFor[regColor]()); !ok || !reflect.DeepEqual(vals, []string{"red", "blue"}) {
-		t.Errorf("EnumValuesFor(regColor) = %v, %v; want [red blue], true", vals, ok)
-	}
-	// Interface-backed type (EnumProvider, no NewEnumSet).
+	// EnumProvider-backed type resolves to its declared values.
 	if vals, ok := EnumValuesFor(reflect.TypeFor[ifaceShade]()); !ok || !reflect.DeepEqual(vals, []string{"light", "dark"}) {
 		t.Errorf("EnumValuesFor(ifaceShade) = %v, %v; want [light dark], true", vals, ok)
+	}
+	// A pointer to an EnumProvider type resolves too (and must not panic).
+	if vals, ok := EnumValuesFor(reflect.TypeFor[*ifaceShade]()); !ok || !reflect.DeepEqual(vals, []string{"light", "dark"}) {
+		t.Errorf("EnumValuesFor(*ifaceShade) = %v, %v; want [light dark], true", vals, ok)
 	}
 	// A plain string is not a known enum.
 	if _, ok := EnumValuesFor(reflect.TypeFor[string]()); ok {

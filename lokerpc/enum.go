@@ -4,60 +4,34 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-	"sync"
 )
 
-// EnumSet declares the values of a string enum type T in one place and registers
-// them so schema generation and validation can resolve T's values by reflection
-// — the type itself needs no method. Declare one set per type at package scope,
-// then declare each value with Add; adding a value is a single line and nothing
-// ever drifts out of sync:
+// EnumProvider is implemented by a named string type to declare its permitted
+// values in one place, so schema generation and validation can resolve them by
+// reflection. Use a value receiver so reflect.Zero(t).Interface().(EnumProvider)
+// works during schema generation; a pointer receiver fails that assertion
+// silently.
 //
 //	type Currency string
 //
-//	var currencies = lokerpc.NewEnumSet[Currency]()
-//
-//	var (
-//	    CurrencyAUD = currencies.Add("AUD")
-//	    CurrencyNZD = currencies.Add("NZD")
-//	    CurrencyUSD = currencies.Add("USD")
+//	const (
+//	    CurrencyAUD Currency = "AUD"
+//	    CurrencyNZD Currency = "NZD"
+//	    CurrencyUSD Currency = "USD"
 //	)
 //
-// The values become package vars rather than consts (a method call can't
-// initialise a const), but are used identically in switches and map keys.
-type EnumSet[T ~string] struct {
-	mu     sync.RWMutex
-	values []string
+//	func (Currency) EnumValues() []string {
+//	    return lokerpc.Enum(CurrencyAUD, CurrencyNZD, CurrencyUSD)
+//	}
+type EnumProvider interface {
+	EnumValues() []string
 }
 
-// NewEnumSet creates an EnumSet for the string enum type T and registers it so
-// TypeSchema and EnumValuesFor can resolve T's values without T implementing any
-// interface. Call it once per type at package scope.
-func NewEnumSet[T ~string]() *EnumSet[T] {
-	s := &EnumSet[T]{}
-	registerEnum(reflect.TypeFor[T](), s.Values)
-	return s
-}
+// enumProviderType is the reflect.Type of EnumProvider.
+var enumProviderType = reflect.TypeOf((*EnumProvider)(nil)).Elem()
 
-// Add records v as a member of the set and returns it, so a named value and its
-// membership are declared in a single expression. Values are reported by Values
-// in the order they were added.
-func (s *EnumSet[T]) Add(v T) T {
-	s.mu.Lock()
-	s.values = append(s.values, string(v))
-	s.mu.Unlock()
-	return v
-}
-
-// Values returns the recorded values, in declaration order, as a fresh slice.
-func (s *EnumSet[T]) Values() []string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return append([]string(nil), s.values...)
-}
-
-// Enum converts typed string constants into a []string. Use it when you keep
-// your values as consts and prefer the EnumProvider interface over an EnumSet:
+// Enum converts typed string constants into a []string for an EnumValues
+// implementation, so a type's values and their declarations never drift apart:
 //
 //	func (Currency) EnumValues() []string {
 //	    return lokerpc.Enum(CurrencyAUD, CurrencyNZD, CurrencyUSD)
@@ -70,41 +44,16 @@ func Enum[T ~string](values ...T) []string {
 	return result
 }
 
-// EnumProvider is an optional alternative to NewEnumSet: a named string type can
-// declare its own values by implementing this interface. Use a value receiver so
-// reflect.Zero(t).Interface().(EnumProvider) works during schema generation; a
-// pointer receiver fails that assertion silently.
-type EnumProvider interface {
-	EnumValues() []string
-}
-
-// enumProviderType is the reflect.Type of EnumProvider.
-var enumProviderType = reflect.TypeOf((*EnumProvider)(nil)).Elem()
-
-// enumRegistry maps a registered enum type to an accessor for its current
-// values. It is written when an EnumSet is constructed (package init in normal
-// use) and read during schema generation and validation.
-var (
-	enumRegistryMu sync.RWMutex
-	enumRegistry   = map[reflect.Type]func() []string{}
-)
-
-func registerEnum(t reflect.Type, values func() []string) {
-	enumRegistryMu.Lock()
-	enumRegistry[t] = values
-	enumRegistryMu.Unlock()
-}
-
-// EnumValuesFor returns the enum values for a named string type, resolving them
-// from the EnumSet registry (preferred — no method required) or from an
-// EnumProvider implementation. ok is false if t is not a known enum. Custom
-// validators use this to enforce enum values at runtime.
+// EnumValuesFor returns the enum values for a named string type that implements
+// EnumProvider. A pointer to such a type is dereferenced first. ok is false if t
+// is not a known enum. Custom validators use this to enforce enum values at
+// runtime.
 func EnumValuesFor(t reflect.Type) (values []string, ok bool) {
-	enumRegistryMu.RLock()
-	fn, found := enumRegistry[t]
-	enumRegistryMu.RUnlock()
-	if found {
-		return fn(), true
+	// Deref pointers: *Currency's method set includes Currency's value-receiver
+	// EnumValues, but reflect.Zero(*Currency) is a nil pointer that would panic
+	// when EnumValues dereferences it.
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
 	}
 	if t.Implements(enumProviderType) {
 		return reflect.Zero(t).Interface().(EnumProvider).EnumValues(), true
@@ -112,13 +61,10 @@ func EnumValuesFor(t reflect.Type) (values []string, ok bool) {
 	return nil, false
 }
 
-// isEnumType reports whether t is a known enum (registered or EnumProvider)
-// without materialising its values.
+// isEnumType reports whether t is a known enum (implements EnumProvider) without
+// materialising its values.
 func isEnumType(t reflect.Type) bool {
-	enumRegistryMu.RLock()
-	_, found := enumRegistry[t]
-	enumRegistryMu.RUnlock()
-	return found || t.Implements(enumProviderType)
+	return t.Implements(enumProviderType)
 }
 
 // AuditEnumValidatorTags walks t's exported fields recursively and returns one
