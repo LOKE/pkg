@@ -6,10 +6,34 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
+	"github.com/LOKE/pkg/errors"
 	"github.com/LOKE/pkg/requestid"
+	"github.com/prometheus/client_golang/prometheus"
 )
+
+var clientLatency *prometheus.HistogramVec = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+	Name: "http_rpc_client_request_duration_seconds",
+	Help: "Duration of rpc requests from the client",
+}, []string{"service", "method"})
+
+var clientRequestCount *prometheus.CounterVec = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Name: "http_rpc_client_requests_total",
+	Help: "The total number of rpc requests from the client",
+}, []string{"service", "method"})
+
+var clientFailures *prometheus.CounterVec = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Name: "http_rpc_client_failures_total",
+	Help: "The total number of rpc failures received",
+}, []string{"service", "method", "type", "status_code"})
+
+func init() {
+	prometheus.MustRegister(clientLatency)
+	prometheus.MustRegister(clientRequestCount)
+	prometheus.MustRegister(clientFailures)
+}
 
 func NewClient(baseURL string) Client {
 	return newClientWithClient(baseURL, http.DefaultClient)
@@ -39,6 +63,10 @@ func (e *rpcClientError) ErrorType() string {
 	return e.Type
 }
 
+func (e *rpcClientError) ErrorCode() string {
+	return e.Code
+}
+
 func (e *rpcClientError) Public() bool {
 	return e.Expose
 }
@@ -57,7 +85,7 @@ func normalizeBaseURL(baseURL string) string {
 	return strings.TrimRight(baseURL, "/") + "/"
 }
 
-func (c Client) DoRequest(ctx context.Context, method string, args, result any) error {
+func (c Client) DoRequest(ctx context.Context, method string, args, result any) (finalErr error) {
 	b := new(bytes.Buffer)
 	if err := json.NewEncoder(b).Encode(args); err != nil {
 		return err
@@ -68,6 +96,9 @@ func (c Client) DoRequest(ctx context.Context, method string, args, result any) 
 	if err != nil {
 		return err
 	}
+
+	defer prometheus.NewTimer(clientLatency.WithLabelValues(c.bURL, method)).ObserveDuration()
+	clientRequestCount.WithLabelValues(c.bURL, method).Inc()
 
 	req.Header.Set("Content-Type", "application/json")
 
@@ -87,6 +118,30 @@ func (c Client) DoRequest(ctx context.Context, method string, args, result any) 
 
 	req = req.WithContext(ctx)
 	res, err := c.client.Do(req)
+
+	defer func() {
+		if finalErr == nil {
+			return
+		}
+
+		errType := "unknown"
+		if rpcErr, ok := errors.AsType[*rpcClientError](finalErr); ok {
+			errType = rpcErr.Type
+		} else if _, ok := finalErr.(*json.InvalidUnmarshalError); ok {
+			errType = "json_decode_error"
+		} else if _, ok := finalErr.(*json.SyntaxError); ok {
+			errType = "json_decode_error"
+		} else if finalErr == context.Canceled {
+			errType = "aborted"
+		}
+
+		status := "-1"
+		if res != nil {
+			status = strconv.Itoa(res.StatusCode)
+		}
+
+		clientFailures.WithLabelValues(c.bURL, method, errType, status).Inc()
+	}()
 
 	if err != nil {
 		return err
