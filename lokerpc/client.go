@@ -63,6 +63,10 @@ func (e *rpcClientError) ErrorType() string {
 	return e.Type
 }
 
+func (e *rpcClientError) ErrorCode() string {
+	return e.Code
+}
+
 func (e *rpcClientError) Public() bool {
 	return e.Expose
 }
