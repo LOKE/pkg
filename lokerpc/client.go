@@ -129,6 +129,8 @@ func (c Client) DoRequest(ctx context.Context, method string, args, result any) 
 			errType = rpcErr.Type
 		} else if _, ok := finalErr.(*json.InvalidUnmarshalError); ok {
 			errType = "json_decode_error"
+		} else if _, ok := finalErr.(*json.SyntaxError); ok {
+			errType = "json_decode_error"
 		} else if finalErr == context.Canceled {
 			errType = "aborted"
 		}
