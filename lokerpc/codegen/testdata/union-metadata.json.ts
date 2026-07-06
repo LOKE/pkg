@@ -50,10 +50,10 @@ export type ZonalMeta = {
 export type GetConfigRequest = {
 };
 
-export type GetNormalRequest = {
+export type GetMetadataOnlyRequest = {
 };
 
-export type GetMetadataOnlyRequest = {
+export type GetNormalRequest = {
 };
 
 /**
@@ -70,15 +70,15 @@ export class OrderingService extends RPCContextClient {
     return this.request(ctx, "getConfig", req);
   }
   /**
-   * get normal discriminator
-   */
-  getNormal(ctx: Context, req: GetNormalRequest): Promise<NormalDiscriminator> {
-    return this.request(ctx, "getNormal", req);
-  }
-  /**
    * get metadata only union
    */
   getMetadataOnly(ctx: Context, req: GetMetadataOnlyRequest): Promise<MetadataOnlyUnion> {
     return this.request(ctx, "getMetadataOnly", req);
+  }
+  /**
+   * get normal discriminator
+   */
+  getNormal(ctx: Context, req: GetNormalRequest): Promise<NormalDiscriminator> {
+    return this.request(ctx, "getNormal", req);
   }
 }
