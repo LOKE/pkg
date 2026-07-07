@@ -14,9 +14,9 @@ import (
 func GenGoType(schema jtd.Schema, imports map[string]struct{}) string {
 	var t string
 
-	for k, v := range schema.Definitions {
+	for _, k := range sortedKeys(schema.Definitions) {
 		t += "\n"
-		t += "type " + goFieldName(k) + " " + GenGoType(v, imports) + "\n"
+		t += "type " + goFieldName(k) + " " + GenGoType(schema.Definitions[k], imports) + "\n"
 	}
 
 	switch schema.Form() {

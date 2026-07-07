@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/LOKE/pkg/lokerpc"
@@ -146,6 +147,12 @@ func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
 
 func normalise(meta *lokerpc.Meta) []string {
 	var defOrder []string
+
+	// Sort methods so codegen output is deterministic. The server builds
+	// meta.Interfaces from a map, so its incoming order is random.
+	sort.Slice(meta.Interfaces, func(i, j int) bool {
+		return meta.Interfaces[i].MethodName < meta.Interfaces[j].MethodName
+	})
 
 	if meta.Definitions == nil {
 		meta.Definitions = map[string]jtd.Schema{}
