@@ -17,6 +17,50 @@ type NamedSchema struct {
 	Schema  jtd.Schema
 }
 
+// addStructFields writes t's fields into schema, promoting the fields of
+// untagged embedded structs the way encoding/json does.
+func addStructFields(t reflect.Type, schema *jtd.Schema, tdefs map[reflect.Type]*NamedSchema) {
+	for f := range t.Fields() {
+		if !f.IsExported() {
+			continue
+		}
+
+		name, omit := parseTag(f.Tag.Get("json"))
+		if name == "-" {
+			continue
+		}
+
+		if f.Anonymous && name == "" {
+			if ft := indirect(f.Type); ft.Kind() == reflect.Struct && ft != timeType {
+				addStructFields(ft, schema, tdefs)
+				continue
+			}
+		}
+
+		if name == "" {
+			name = f.Name
+		}
+		s := TypeSchema(f.Type, tdefs)
+		if omit {
+			if schema.OptionalProperties == nil {
+				schema.OptionalProperties = make(map[string]jtd.Schema)
+			}
+
+			s.Nullable = false // maybe shouldn't be necessary
+			schema.OptionalProperties[name] = *s
+		} else {
+			schema.Properties[name] = *s
+		}
+	}
+}
+
+func indirect(t reflect.Type) reflect.Type {
+	if t.Kind() == reflect.Pointer {
+		return t.Elem()
+	}
+	return t
+}
+
 func TypeSchema(t reflect.Type, tdefs map[reflect.Type]*NamedSchema) *jtd.Schema {
 	if ns, ok := tdefs[t]; ok {
 		return &jtd.Schema{Ref: &ns.Name}
@@ -52,29 +96,7 @@ func TypeSchema(t reflect.Type, tdefs map[reflect.Type]*NamedSchema) *jtd.Schema
 
 			schema.Properties = make(map[string]jtd.Schema)
 
-			for i := 0; i < t.NumField(); i++ {
-				f := t.Field(i)
-
-				if !f.IsExported() {
-					continue
-				}
-
-				name, omit := parseTag(f.Tag.Get("json"))
-				if name == "" {
-					name = f.Name
-				}
-				s := TypeSchema(f.Type, tdefs)
-				if omit {
-					if schema.OptionalProperties == nil {
-						schema.OptionalProperties = make(map[string]jtd.Schema)
-					}
-
-					s.Nullable = false // maybe shouldn't be necessary
-					schema.OptionalProperties[name] = *s
-				} else {
-					schema.Properties[name] = *s
-				}
-			}
+			addStructFields(t, &schema, tdefs)
 
 			if nt, ok := tdefs[t]; ok {
 				nt.Schema = schema

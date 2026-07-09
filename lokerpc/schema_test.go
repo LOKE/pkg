@@ -133,6 +133,70 @@ func TestTypeSchema(t *testing.T) {
 			want: `{"properties": {}}`,
 		},
 		{
+			name: "embedded struct is promoted, not nested",
+			args: args{
+				t: reflect.TypeOf(struct {
+					NamedStruct
+					Bar string `json:"bar"`
+				}{}),
+			},
+			want: `{
+				"properties": {
+					"foo": { "type": "string" },
+					"bar": { "type": "string" }
+				}
+			}`,
+		},
+		{
+			name: "embedded pointer to struct is promoted",
+			args: args{
+				t: reflect.TypeOf(struct {
+					*NamedStruct
+					Bar string `json:"bar"`
+				}{}),
+			},
+			want: `{
+				"properties": {
+					"foo": { "type": "string" },
+					"bar": { "type": "string" }
+				}
+			}`,
+		},
+		{
+			name: "embedded struct with a json tag stays nested",
+			args: args{
+				t: reflect.TypeOf(struct {
+					NamedStruct `json:"named"`
+				}{}),
+			},
+			want: `{
+				"definitions": {
+					"NamedStruct": {
+						"properties": {
+							"foo": { "type": "string" }
+						}
+					}
+				},
+				"properties": {
+					"named": { "ref": "NamedStruct" }
+				}
+			}`,
+		},
+		{
+			name: "fields tagged - are skipped",
+			args: args{
+				t: reflect.TypeOf(struct {
+					Foo string `json:"foo"`
+					Bar string `json:"-"`
+				}{}),
+			},
+			want: `{
+				"properties": {
+					"foo": { "type": "string" }
+				}
+			}`,
+		},
+		{
 			name: "timestamp",
 			args: args{
 				t: reflect.TypeOf(struct {
