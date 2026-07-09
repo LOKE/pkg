@@ -353,3 +353,19 @@ func TestTypeSchema(t *testing.T) {
 		})
 	}
 }
+
+// selfEmbed embeds itself; promoting its fields must terminate.
+type selfEmbed struct {
+	*selfEmbed
+	Value string `json:"value"`
+}
+
+func TestTypeSchemaSelfEmbedded(t *testing.T) {
+	tdefs := map[reflect.Type]*NamedSchema{}
+	TypeSchema(reflect.TypeFor[selfEmbed](), tdefs)
+
+	got := tdefs[reflect.TypeFor[selfEmbed]()].Schema
+	if _, ok := got.Properties["value"]; !ok || len(got.Properties) != 1 {
+		t.Errorf("Properties = %v, want only value", got.Properties)
+	}
+}

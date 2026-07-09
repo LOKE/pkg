@@ -20,6 +20,10 @@ type NamedSchema struct {
 // addStructFields writes t's fields into schema, promoting the fields of
 // untagged embedded structs the way encoding/json does.
 func addStructFields(t reflect.Type, schema *jtd.Schema, tdefs map[reflect.Type]*NamedSchema) {
+	addStructFieldsSeen(t, schema, tdefs, map[reflect.Type]bool{t: true})
+}
+
+func addStructFieldsSeen(t reflect.Type, schema *jtd.Schema, tdefs map[reflect.Type]*NamedSchema, seen map[reflect.Type]bool) {
 	for f := range t.Fields() {
 		if !f.IsExported() {
 			continue
@@ -32,7 +36,13 @@ func addStructFields(t reflect.Type, schema *jtd.Schema, tdefs map[reflect.Type]
 
 		if f.Anonymous && name == "" {
 			if ft := indirect(f.Type); ft.Kind() == reflect.Struct && ft != timeType {
-				addStructFields(ft, schema, tdefs)
+				// Recursive embedding (Node embeds *Node) can't be promoted;
+				// encoding/json drops the deeper copies too.
+				if !seen[ft] {
+					seen[ft] = true
+					addStructFieldsSeen(ft, schema, tdefs, seen)
+					delete(seen, ft)
+				}
 				continue
 			}
 		}
