@@ -433,17 +433,17 @@ func TestTypeSchemaEmbeddedOverride(t *testing.T) {
 	}
 }
 
-// selfEmbed embeds itself; promoting its fields must terminate.
-type selfEmbed struct {
-	*selfEmbed
+// SelfEmbed embeds itself; promoting its fields must terminate.
+type SelfEmbed struct {
+	*SelfEmbed
 	Value string `json:"value"`
 }
 
 func TestTypeSchemaSelfEmbedded(t *testing.T) {
 	tdefs := map[reflect.Type]*NamedSchema{}
-	TypeSchema(reflect.TypeFor[selfEmbed](), tdefs)
+	TypeSchema(reflect.TypeFor[SelfEmbed](), tdefs)
 
-	got := tdefs[reflect.TypeFor[selfEmbed]()].Schema
+	got := tdefs[reflect.TypeFor[SelfEmbed]()].Schema
 	if _, ok := got.Properties["value"]; !ok || len(got.Properties) != 1 {
 		t.Errorf("Properties = %v, want only value", got.Properties)
 	}
