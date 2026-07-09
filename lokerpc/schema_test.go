@@ -354,6 +354,85 @@ func TestTypeSchema(t *testing.T) {
 	}
 }
 
+// EmbedBase is shadowed by the structs below.
+type EmbedBase struct {
+	Value string `json:"value"`
+	Other string `json:"other"`
+}
+
+// Parent field shadows the embedded one, embed declared first.
+type OverrideFirst struct {
+	EmbedBase
+	Value int `json:"value"`
+}
+
+// Same, but embed declared last: declaration order must not matter.
+type OverrideLast struct {
+	Value int `json:"value"`
+	EmbedBase
+}
+
+// Parent shadows with omitempty: the embedded required "value" must not
+// survive alongside it, or the schema is invalid.
+type OverrideOmit struct {
+	EmbedBase
+	Value int `json:"value,omitempty"`
+}
+
+func TestTypeSchemaEmbeddedOverride(t *testing.T) {
+	int32Schema := jtd.Schema{Type: jtd.TypeInt32}
+	stringSchema := jtd.Schema{Type: jtd.TypeString}
+
+	tests := []struct {
+		name string
+		typ  reflect.Type
+		want jtd.Schema
+	}{
+		{
+			name: "embed first",
+			typ:  reflect.TypeOf(OverrideFirst{}),
+			want: jtd.Schema{Properties: map[string]jtd.Schema{
+				"value": int32Schema,
+				"other": stringSchema,
+			}},
+		},
+		{
+			name: "embed last",
+			typ:  reflect.TypeOf(OverrideLast{}),
+			want: jtd.Schema{Properties: map[string]jtd.Schema{
+				"value": int32Schema,
+				"other": stringSchema,
+			}},
+		},
+		{
+			name: "shadowed by omitempty",
+			typ:  reflect.TypeOf(OverrideOmit{}),
+			want: jtd.Schema{
+				Properties:         map[string]jtd.Schema{"other": stringSchema},
+				OptionalProperties: map[string]jtd.Schema{"value": int32Schema},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tdefs := map[reflect.Type]*NamedSchema{}
+			TypeSchema(tt.typ, tdefs)
+			got := tdefs[tt.typ].Schema
+
+			if err := got.Validate(); err != nil {
+				t.Errorf("Validate() error = %v", err)
+			}
+
+			if !reflect.DeepEqual(got, tt.want) {
+				gotstr, _ := json.MarshalIndent(got, "", "  ")
+				wantstr, _ := json.MarshalIndent(tt.want, "", "  ")
+				t.Errorf("TypeSchema() = %s, want %s", gotstr, wantstr)
+			}
+		})
+	}
+}
+
 // selfEmbed embeds itself; promoting its fields must terminate.
 type selfEmbed struct {
 	*selfEmbed
