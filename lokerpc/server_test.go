@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -109,5 +110,23 @@ func TestMountHandlers(t *testing.T) {
 				t.Errorf("want body %q, got %q", tt.wantBody, gotBody)
 			}
 		})
+	}
+}
+
+func TestFieldNames(t *testing.T) {
+	type Pagination struct {
+		Limit          *int    `json:"limit,omitempty"`
+		NextPageCursor *string `json:"nextPageCursor,omitempty"`
+	}
+
+	got := FieldNames(struct {
+		OrganizationUID string `json:"organizationUid"`
+		Secret          string `json:"-"`
+		Pagination
+	}{})
+
+	want := []string{"organizationUid", "limit", "nextPageCursor"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("FieldNames() = %v, want %v", got, want)
 	}
 }

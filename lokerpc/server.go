@@ -334,14 +334,23 @@ func newMetaHandler(meta any) http.HandlerFunc {
 }
 
 func FieldNames(i interface{}) []string {
+	return fieldNames(reflect.TypeOf(i))
+}
+
+func fieldNames(t reflect.Type) []string {
 	pm := []string{}
-	t := reflect.TypeOf(i)
 
 	for n := 0; n < t.NumField(); n++ {
 		f := t.Field(n)
 		name, _ := parseTag(f.Tag.Get("json"))
 		if name == "-" {
 			continue
+		}
+		if f.Anonymous && name == "" {
+			if ft := indirect(f.Type); ft.Kind() == reflect.Struct && ft != timeType {
+				pm = append(pm, fieldNames(ft)...)
+				continue
+			}
 		}
 		if name == "" {
 			name = f.Name

@@ -17,6 +17,94 @@ type NamedSchema struct {
 	Schema  jtd.Schema
 }
 
+// addStructFields writes t's fields into schema, promoting the fields of
+// untagged embedded structs the way encoding/json does.
+func addStructFields(t reflect.Type, schema *jtd.Schema, tdefs map[reflect.Type]*NamedSchema) {
+	addStructFieldsSeen(t, schema, tdefs, map[reflect.Type]bool{t: true})
+}
+
+func addStructFieldsSeen(t reflect.Type, schema *jtd.Schema, tdefs map[reflect.Type]*NamedSchema, seen map[reflect.Type]bool) {
+	var embedded []reflect.Type
+
+	for f := range t.Fields() {
+		if !f.IsExported() {
+			continue
+		}
+
+		name, omit := parseTag(f.Tag.Get("json"))
+		if name == "-" {
+			continue
+		}
+
+		if f.Anonymous && name == "" {
+			if ft := indirect(f.Type); ft.Kind() == reflect.Struct && ft != timeType {
+				embedded = append(embedded, ft)
+				continue
+			}
+		}
+
+		if name == "" {
+			name = f.Name
+		}
+		s := TypeSchema(f.Type, tdefs)
+		if omit {
+			if schema.OptionalProperties == nil {
+				schema.OptionalProperties = make(map[string]jtd.Schema)
+			}
+
+			s.Nullable = false // maybe shouldn't be necessary
+			schema.OptionalProperties[name] = *s
+		} else {
+			schema.Properties[name] = *s
+		}
+	}
+
+	// Promoted fields are merged last so an outer field always shadows an
+	// embedded one of the same name, whatever the declaration order.
+	for _, ft := range embedded {
+		// Recursive embedding (Node embeds *Node) can't be promoted;
+		// encoding/json drops the deeper copies too.
+		if seen[ft] {
+			continue
+		}
+		seen[ft] = true
+
+		sub := jtd.Schema{Properties: make(map[string]jtd.Schema)}
+		addStructFieldsSeen(ft, &sub, tdefs, seen)
+		delete(seen, ft)
+
+		for name, s := range sub.Properties {
+			if !hasProperty(schema, name) {
+				schema.Properties[name] = s
+			}
+		}
+		for name, s := range sub.OptionalProperties {
+			if hasProperty(schema, name) {
+				continue
+			}
+			if schema.OptionalProperties == nil {
+				schema.OptionalProperties = make(map[string]jtd.Schema)
+			}
+			schema.OptionalProperties[name] = s
+		}
+	}
+}
+
+func hasProperty(schema *jtd.Schema, name string) bool {
+	if _, ok := schema.Properties[name]; ok {
+		return true
+	}
+	_, ok := schema.OptionalProperties[name]
+	return ok
+}
+
+func indirect(t reflect.Type) reflect.Type {
+	if t.Kind() == reflect.Pointer {
+		return t.Elem()
+	}
+	return t
+}
+
 func TypeSchema(t reflect.Type, tdefs map[reflect.Type]*NamedSchema) *jtd.Schema {
 	if ns, ok := tdefs[t]; ok {
 		return &jtd.Schema{Ref: &ns.Name}
@@ -52,29 +140,7 @@ func TypeSchema(t reflect.Type, tdefs map[reflect.Type]*NamedSchema) *jtd.Schema
 
 			schema.Properties = make(map[string]jtd.Schema)
 
-			for i := 0; i < t.NumField(); i++ {
-				f := t.Field(i)
-
-				if !f.IsExported() {
-					continue
-				}
-
-				name, omit := parseTag(f.Tag.Get("json"))
-				if name == "" {
-					name = f.Name
-				}
-				s := TypeSchema(f.Type, tdefs)
-				if omit {
-					if schema.OptionalProperties == nil {
-						schema.OptionalProperties = make(map[string]jtd.Schema)
-					}
-
-					s.Nullable = false // maybe shouldn't be necessary
-					schema.OptionalProperties[name] = *s
-				} else {
-					schema.Properties[name] = *s
-				}
-			}
+			addStructFields(t, &schema, tdefs)
 
 			if nt, ok := tdefs[t]; ok {
 				nt.Schema = schema
