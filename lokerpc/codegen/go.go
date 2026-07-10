@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/LOKE/pkg/lokerpc"
@@ -55,9 +56,11 @@ func GenGoType(schema jtd.Schema, imports map[string]struct{}) string {
 	case jtd.FormProperties:
 		t += "struct {\n"
 		for _, k := range sortedKeys(schema.Properties) {
+			t += goDocString(schemaDescription(schema.Properties[k]), "\t")
 			t += "\t" + goFieldName(k) + " " + GenGoType(schema.Properties[k], imports) + "`json:\"" + k + "\"`\n"
 		}
 		for _, k := range sortedKeys(schema.OptionalProperties) {
+			t += goDocString(schemaDescription(schema.OptionalProperties[k]), "\t")
 			t += "\t" + goFieldName(k) + " " + GenGoType(schema.OptionalProperties[k], imports) + "`json:\"" + k + ",omitempty\"`\n"
 		}
 		t += "}"
@@ -118,20 +121,26 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 	}
 
 	var b bytes.Buffer
+	identifiers := make(goIdentifierSet)
+	for _, name := range defOrder {
+		identifiers.reserve(goFieldName(name))
+	}
+	identifiers.reserve(goFieldName(meta.ServiceName) + "Service")
+	identifiers.reserve(goFieldName(meta.ServiceName) + "RPCClient")
 
 	for _, k := range defOrder {
 		b.WriteString("\n")
-		fmt.Fprintf(&b, "type %s %s;\n", goFieldName(k), GenGoType(meta.Definitions[k], imports))
+		writeGoDefinition(&b, k, meta.Definitions[k], imports, identifiers)
 	}
 
 	// Service interface
 	b.WriteString("\n")
-	// goDocComment(b, meta.Help, "")
+	goDocComment(&b, meta.Help, "")
 	b.WriteString("type " + goFieldName(meta.ServiceName) + "Service interface {\n")
 	for _, v := range meta.Interfaces {
 		m := resolveMethodTypes(v, imports)
 
-		// goDocComment(b, v.Help, "\t")
+		goDocComment(&b, v.Help, "\t")
 		if m.isVoid {
 			fmt.Fprintf(&b, "\t%s(context.Context, %s) error\n", goFieldName(v.MethodName), m.reqType)
 		} else {
@@ -142,10 +151,11 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 
 	// Service client implementation
 	b.WriteString("\n")
-	// goDocComment(b, meta.Help, "")
+	goDocComment(&b, meta.Help, "")
 	b.WriteString("type " + goFieldName(meta.ServiceName) + "RPCClient struct{\nlokerpc.Client}\n\n")
 	for _, v := range meta.Interfaces {
 		m := resolveMethodTypes(v, imports)
+		goDocComment(&b, v.Help, "")
 
 		if m.isVoid {
 			fmt.Fprintf(&b, "func (c %sRPCClient) %s(ctx context.Context, req %s) error {\n", goFieldName(meta.ServiceName), goFieldName(v.MethodName), m.reqType)
@@ -187,6 +197,79 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 	_, err := io.Copy(w, &b)
 
 	return err
+}
+
+func writeGoDefinition(
+	b *bytes.Buffer,
+	name string,
+	schema jtd.Schema,
+	imports map[string]struct{},
+	identifiers goIdentifierSet,
+) {
+	typeName := goFieldName(name)
+	goDocComment(b, schemaDescription(schema), "")
+	fmt.Fprintf(b, "type %s %s\n", typeName, GenGoType(schema, imports))
+
+	if schema.Form() != jtd.FormEnum {
+		return
+	}
+	names := schemaEnumNames(schema)
+	if len(names) == 0 {
+		return
+	}
+	originalType, _ := schema.Metadata["enumType"].(string)
+	b.WriteString("\nconst (\n")
+	for index, constantName := range names {
+		if originalType != "" && strings.HasPrefix(constantName, originalType) {
+			constantName = strings.TrimPrefix(constantName, originalType)
+		}
+		constantName = goFieldName(name + constantName)
+		constantName = identifiers.claim(constantName)
+		fmt.Fprintf(b, "\t%s %s = %s\n", constantName, typeName, strconv.Quote(schema.Enum[index]))
+	}
+	b.WriteString(")\n")
+}
+
+type goIdentifierSet map[string]struct{}
+
+func (identifiers goIdentifierSet) reserve(name string) {
+	identifiers[name] = struct{}{}
+}
+
+func (identifiers goIdentifierSet) claim(name string) string {
+	if _, exists := identifiers[name]; !exists {
+		identifiers.reserve(name)
+		return name
+	}
+	for suffix := 2; ; suffix++ {
+		candidate := name + strconv.Itoa(suffix)
+		if _, exists := identifiers[candidate]; !exists {
+			identifiers.reserve(candidate)
+			return candidate
+		}
+	}
+}
+
+func goDocComment(w io.Writer, text string, indent string) {
+	if text == "" {
+		return
+	}
+	fmt.Fprint(w, goDocString(text, indent))
+}
+
+func goDocString(text string, indent string) string {
+	if text == "" {
+		return ""
+	}
+	var comment strings.Builder
+	for _, line := range strings.Split(text, "\n") {
+		if line == "" {
+			fmt.Fprintf(&comment, "%s//\n", indent)
+			continue
+		}
+		fmt.Fprintf(&comment, "%s// %s\n", indent, line)
+	}
+	return comment.String()
 }
 
 // Regexp that matches word boundaries,

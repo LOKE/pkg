@@ -27,9 +27,6 @@ export type GetUserRequest = {
   id: string;
 };
 
-/**
- * 
- */
 export class HyphenatedServiceNameService extends RPCContextClient {
   constructor(baseUrl: string) {
     super(baseUrl, "hyphenated-service-name")

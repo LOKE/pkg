@@ -13,9 +13,6 @@ export type GetUserResponse = {
   name: string;
 };
 
-/**
- * 
- */
 export class NestedService extends RPCContextClient {
   constructor(baseUrl: string) {
     super(baseUrl, "nested")

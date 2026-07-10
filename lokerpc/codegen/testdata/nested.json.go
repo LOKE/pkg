@@ -20,6 +20,7 @@ type GetUserResponse struct {
 }
 
 type NestedService interface {
+	// hello1 method
 	GetUser(context.Context, GetUserRequest) (*GetUserResponse, error)
 }
 
@@ -27,6 +28,7 @@ type NestedRPCClient struct {
 	lokerpc.Client
 }
 
+// hello1 method
 func (c NestedRPCClient) GetUser(ctx context.Context, req GetUserRequest) (*GetUserResponse, error) {
 	var res GetUserResponse
 	err := c.DoRequest(ctx, "getUser", req, &res)

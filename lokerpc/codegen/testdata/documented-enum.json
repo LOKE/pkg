@@ -1,0 +1,34 @@
+{
+  "serviceName": "payments",
+  "help": "PaymentsService manages payments.",
+  "multiArg": false,
+  "definitions": {
+    "Currency": {
+      "enum": ["AUD", "NZD"],
+      "metadata": {
+        "description": "Currency is a supported payment currency.",
+        "enumNames": ["CurrencyAUD", "CurrencyNZD"],
+        "enumType": "Currency"
+      }
+    },
+    "Payment": {
+      "properties": {
+        "currency": {
+          "ref": "Currency",
+          "metadata": {"description": "Currency is used for the payment."}
+        }
+      },
+      "metadata": {"description": "Payment describes a payment."}
+    }
+  },
+  "interfaces": [
+    {
+      "help": "CreatePayment creates a payment.",
+      "methodName": "createPayment",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": {"ref": "Payment"},
+      "responseTypeDef": {"ref": "Payment"}
+    }
+  ]
+}

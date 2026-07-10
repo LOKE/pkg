@@ -23,6 +23,7 @@ type GetUserResponse_ struct {
 }
 
 type TypedService interface {
+	// hello1 method
 	GetUser(context.Context, GetUserRequest_) (*GetUserResponse_, error)
 }
 
@@ -30,6 +31,7 @@ type TypedRPCClient struct {
 	lokerpc.Client
 }
 
+// hello1 method
 func (c TypedRPCClient) GetUser(ctx context.Context, req GetUserRequest_) (*GetUserResponse_, error) {
 	var res GetUserResponse_
 	err := c.DoRequest(ctx, "getUser", req, &res)

@@ -63,13 +63,20 @@ type Service struct {
 	endpointCodecs EndpointCodecMap
 }
 
-// NewService creates a new Service
-func NewService(name, help string, ecm EndpointCodecMap) *Service {
-	return &Service{
+// ServiceOption configures a Service.
+type ServiceOption func(*Service)
+
+// NewService creates a new Service.
+func NewService(name, help string, ecm EndpointCodecMap, opts ...ServiceOption) *Service {
+	service := &Service{
 		Name:           name,
 		Help:           help,
 		endpointCodecs: ecm,
 	}
+	for _, opt := range opts {
+		opt(service)
+	}
+	return service
 }
 
 // Endpoint is an abstract rpc endpoint

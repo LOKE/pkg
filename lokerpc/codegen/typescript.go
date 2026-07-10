@@ -60,9 +60,15 @@ func GenTypescriptType(schema jtd.Schema) string {
 	case jtd.FormProperties:
 		t += "{\n"
 		for _, k := range sortedKeys(schema.Properties) {
+			var comment strings.Builder
+			tsDocComment(&comment, schemaDescription(schema.Properties[k]), "  ")
+			t += comment.String()
 			t += "  " + quoteFieldNames(k) + ": " + GenTypescriptType(schema.Properties[k]) + ";\n"
 		}
 		for _, k := range sortedKeys(schema.OptionalProperties) {
+			var comment strings.Builder
+			tsDocComment(&comment, schemaDescription(schema.OptionalProperties[k]), "  ")
+			t += comment.String()
 			t += "  " + quoteFieldNames(k) + "?: " + GenTypescriptType(schema.OptionalProperties[k]) + ";\n"
 		}
 		t += "}"
@@ -110,6 +116,7 @@ func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
 
 	for _, k := range defOrder {
 		b.WriteString("\n")
+		tsDocComment(b, schemaDescription(meta.Definitions[k]), "")
 		fmt.Fprintf(b, "export type %s = %s;\n", capitalize(k), GenTypescriptType(meta.Definitions[k]))
 	}
 
@@ -192,6 +199,10 @@ func normalise(meta *lokerpc.Meta) []string {
 }
 
 func tsDocComment(w io.Writer, text string, indent string) {
+	if text == "" {
+		return
+	}
+	text = strings.ReplaceAll(text, "*/", "* /")
 	lines := strings.Split(text, "\n")
 
 	fmt.Fprintf(w, "%s/**\n", indent)

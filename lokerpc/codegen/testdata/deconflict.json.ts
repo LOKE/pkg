@@ -17,9 +17,6 @@ export type GetUserResponse_ = {
   id: string;
 };
 
-/**
- * 
- */
 export class TypedService extends RPCContextClient {
   constructor(baseUrl: string) {
     super(baseUrl, "typed")

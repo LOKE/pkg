@@ -2,9 +2,12 @@ package codegen
 
 import (
 	"fmt"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
+
+	jtd "github.com/jsontypedef/json-typedef-go"
 )
 
 func capitalize(s string) string {
@@ -12,6 +15,35 @@ func capitalize(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+func schemaDescription(schema jtd.Schema) string {
+	description, _ := schema.Metadata["description"].(string)
+	return description
+}
+
+func schemaEnumNames(schema jtd.Schema) []string {
+	raw, ok := schema.Metadata["enumNames"]
+	if !ok {
+		return nil
+	}
+
+	value := reflect.ValueOf(raw)
+	if value.Kind() != reflect.Slice {
+		return nil
+	}
+	names := make([]string, 0, value.Len())
+	for index := 0; index < value.Len(); index++ {
+		name, ok := value.Index(index).Interface().(string)
+		if !ok {
+			return nil
+		}
+		names = append(names, name)
+	}
+	if len(names) != len(schema.Enum) {
+		return nil
+	}
+	return names
 }
 
 func pascalCase(kebabCase string) string {
