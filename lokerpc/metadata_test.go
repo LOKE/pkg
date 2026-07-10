@@ -59,12 +59,11 @@ func registerTestMetadata() {
 func TestGeneratedMetadataDecoratesServiceAndSchema(t *testing.T) {
 	registerTestMetadata()
 
-	service := NewService("records", "old service help", EndpointCodecMap{
-		"lookup": MakeStandardEndpointCodec(
+	service := NewService("records", GeneratedDocs[generatedDocsService](), EndpointCodecMap{
+		"lookup": MakeGeneratedStandardEndpointCodec(
 			func(_ context.Context, request generatedDocsRequest) (generatedDocsRequest, error) {
 				return request, nil
 			},
-			"old method help",
 		),
 		"undocumented": MakeStandardEndpointCodec(
 			func(_ context.Context, request generatedDocsRequest) (generatedDocsRequest, error) {
@@ -72,7 +71,7 @@ func TestGeneratedMetadataDecoratesServiceAndSchema(t *testing.T) {
 			},
 			"manual fallback",
 		),
-	}, WithGeneratedDocs[generatedDocsService]())
+	})
 
 	if service.Help != "generatedDocsService finds records." {
 		t.Fatalf("service help = %q", service.Help)
@@ -131,15 +130,24 @@ func TestGeneratedMetadataDecoratesServiceAndSchema(t *testing.T) {
 	}
 }
 
-func TestWithGeneratedDocsRequiresGeneratedMetadata(t *testing.T) {
+func TestGeneratedDocsRequiresGeneratedMetadata(t *testing.T) {
 	type missingService interface {
 		Missing(context.Context, generatedDocsRequest) (generatedDocsRequest, error)
 	}
 
 	defer func() {
 		if recovered := recover(); recovered == nil {
-			t.Fatal("WithGeneratedDocs did not panic")
+			t.Fatal("GeneratedDocs did not panic")
 		}
 	}()
-	NewService("missing", "", EndpointCodecMap{}, WithGeneratedDocs[missingService]())
+	NewService("missing", GeneratedDocs[missingService](), EndpointCodecMap{})
+}
+
+func TestGeneratedServiceDocsRejectsZeroValue(t *testing.T) {
+	defer func() {
+		if recovered := recover(); recovered == nil {
+			t.Fatal("zero-value GeneratedServiceDocs did not panic")
+		}
+	}()
+	NewService("invalid", GeneratedServiceDocs{}, EndpointCodecMap{})
 }

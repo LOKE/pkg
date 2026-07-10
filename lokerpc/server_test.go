@@ -130,3 +130,30 @@ func TestFieldNames(t *testing.T) {
 		t.Errorf("FieldNames() = %v, want %v", got, want)
 	}
 }
+
+func TestNewServiceManualDescription(t *testing.T) {
+	type manualHelp string
+	service := NewService("manual", manualHelp("manual service help"), EndpointCodecMap{})
+	if service.Help != "manual service help" {
+		t.Fatalf("service help = %q", service.Help)
+	}
+}
+
+func TestEndpointCodecArguments(t *testing.T) {
+	method := func(_ context.Context, request struct{}) (struct{}, error) {
+		return request, nil
+	}
+
+	generated := MakeGeneratedStandardEndpointCodec(method)
+	if generated.Help != "" {
+		t.Fatalf("generated endpoint help = %q", generated.Help)
+	}
+
+	manual := MakeStandardEndpointCodec(method, "manual endpoint help", NoNilResponse())
+	if manual.Help != "manual endpoint help" {
+		t.Fatalf("manual endpoint help = %q", manual.Help)
+	}
+	if !manual.errOnNilResponse {
+		t.Fatal("NoNilResponse option was not applied")
+	}
+}

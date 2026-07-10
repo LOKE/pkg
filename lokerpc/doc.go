@@ -10,14 +10,16 @@
 //
 //	lokerpc.NewService(
 //		"payments",
-//		"fallback help",
+//		lokerpc.GeneratedDocs[Service](),
 //		endpoints,
-//		lokerpc.WithGeneratedDocs[Service](),
 //	)
 //
 // The generator follows local request and response types reachable from the
 // selected interface. Shared DTO packages can register their own roots with
 // repeatable -type flags. It preserves type and field doc comments as JTD
 // description metadata, and exposes named string constants as JTD enums.
-// Existing help text remains the fallback for undocumented interface methods.
+// Generated services use MakeGeneratedStandardEndpointCodec or
+// MakeGeneratedVoidEndpointCodec so no empty help placeholders are needed.
+// Existing services may continue passing manual help strings to NewService and
+// the original endpoint codec constructors.
 package lokerpc

@@ -68,36 +68,43 @@ func metadataForType(t reflect.Type) (TypeMetadata, bool) {
 	return typeMetadata, ok
 }
 
-// WithGeneratedDocs fills service and endpoint help from a generated Go service
-// interface. Existing help is retained for undocumented methods.
-func WithGeneratedDocs[ServiceInterface any]() ServiceOption {
+// GeneratedServiceDocs identifies generated metadata for a service interface.
+type GeneratedServiceDocs struct {
+	serviceType reflect.Type
+}
+
+// GeneratedDocs selects generated documentation from a Go service interface.
+func GeneratedDocs[ServiceInterface any]() GeneratedServiceDocs {
 	t := reflect.TypeFor[ServiceInterface]()
 	if t == nil || t.Kind() != reflect.Interface {
-		panic("lokerpc: WithGeneratedDocs requires an interface type")
+		panic("lokerpc: GeneratedDocs requires an interface type")
+	}
+	return GeneratedServiceDocs{serviceType: t}
+}
+
+func (generated GeneratedServiceDocs) apply(service *Service) {
+	t := generated.serviceType
+	if t == nil {
+		panic("lokerpc: invalid generated service docs; use GeneratedDocs with an interface type")
+	}
+	generatedMetadata.RLock()
+	packageMetadata, packageExists := generatedMetadata.packages[t.PkgPath()]
+	serviceMetadata, serviceExists := packageMetadata.Services[t.Name()]
+	generatedMetadata.RUnlock()
+
+	if !packageExists || !serviceExists {
+		panic(fmt.Sprintf(
+			"lokerpc: no generated docs for %s; run go generate in its package",
+			t.String(),
+		))
 	}
 
-	return func(service *Service) {
-		generatedMetadata.RLock()
-		packageMetadata, packageExists := generatedMetadata.packages[t.PkgPath()]
-		serviceMetadata, serviceExists := packageMetadata.Services[t.Name()]
-		generatedMetadata.RUnlock()
-
-		if !packageExists || !serviceExists {
-			panic(fmt.Sprintf(
-				"lokerpc: no generated docs for %s; run go generate in its package",
-				t.String(),
-			))
-		}
-
-		if serviceMetadata.Description != "" {
-			service.Help = serviceMetadata.Description
-		}
-		for rpcName, endpoint := range service.endpointCodecs {
-			goName := exportedName(rpcName)
-			if help := serviceMetadata.Methods[goName]; help != "" {
-				endpoint.Help = help
-				service.endpointCodecs[rpcName] = endpoint
-			}
+	service.Help = serviceMetadata.Description
+	for rpcName, endpoint := range service.endpointCodecs {
+		goName := exportedName(rpcName)
+		if help := serviceMetadata.Methods[goName]; help != "" {
+			endpoint.Help = help
+			service.endpointCodecs[rpcName] = endpoint
 		}
 	}
 }

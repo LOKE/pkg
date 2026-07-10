@@ -145,14 +145,13 @@ import (
 )
 
 func TestGeneratedRegistration(t *testing.T) {
-	service := lokerpc.NewService("widgets", "", lokerpc.EndpointCodecMap{
-		"lookup": lokerpc.MakeStandardEndpointCodec(
+	service := lokerpc.NewService("widgets", lokerpc.GeneratedDocs[Service](), lokerpc.EndpointCodecMap{
+		"lookup": lokerpc.MakeGeneratedStandardEndpointCodec(
 			func(_ context.Context, request LookupRequest) (*Widget, error) {
 				return &Widget{State: request.State}, nil
 			},
-			"",
 		),
-	}, lokerpc.WithGeneratedDocs[Service]())
+	})
 	mux := http.NewServeMux()
 	lokerpc.MountHandlers(log.NewNopLogger(), mux, service)
 	response := httptest.NewRecorder()

@@ -63,18 +63,25 @@ type Service struct {
 	endpointCodecs EndpointCodecMap
 }
 
-// ServiceOption configures a Service.
-type ServiceOption func(*Service)
+// ServiceDescription accepts either manual help text or generated service docs.
+type ServiceDescription interface {
+	~string | GeneratedServiceDocs
+}
 
 // NewService creates a new Service.
-func NewService(name, help string, ecm EndpointCodecMap, opts ...ServiceOption) *Service {
+//
+// The description may be manual help text or GeneratedDocs for a Go service
+// interface. Generated documentation also supplies endpoint help.
+func NewService[Description ServiceDescription](name string, description Description, ecm EndpointCodecMap) *Service {
 	service := &Service{
 		Name:           name,
-		Help:           help,
 		endpointCodecs: ecm,
 	}
-	for _, opt := range opts {
-		opt(service)
+
+	if generated, ok := any(description).(GeneratedServiceDocs); ok {
+		generated.apply(service)
+	} else {
+		service.Help = reflect.ValueOf(description).String()
 	}
 	return service
 }
@@ -158,17 +165,37 @@ func MakeVoidEndpoint[Req any](method VoidMethod[Req]) Endpoint {
 
 type EndpointCodecOption func(*EndpointCodec)
 
-// MakeStandardEndpointCodec
-func MakeStandardEndpointCodec[Req any, Res any](method StandardMethod[Req, Res], help string, opts ...EndpointCodecOption) EndpointCodec {
+// MakeStandardEndpointCodec creates an EndpointCodec with manual help text.
+func MakeStandardEndpointCodec[Req any, Res any](
+	method StandardMethod[Req, Res],
+	help string,
+	opts ...EndpointCodecOption,
+) EndpointCodec {
+	return makeStandardEndpointCodec(method, help, opts)
+}
+
+// MakeGeneratedStandardEndpointCodec creates an EndpointCodec whose help comes
+// from GeneratedDocs supplied to NewService.
+func MakeGeneratedStandardEndpointCodec[Req any, Res any](
+	method StandardMethod[Req, Res],
+	opts ...EndpointCodecOption,
+) EndpointCodec {
+	return makeStandardEndpointCodec(method, "", opts)
+}
+
+func makeStandardEndpointCodec[Req any, Res any](
+	method StandardMethod[Req, Res],
+	help string,
+	opts []EndpointCodecOption,
+) EndpointCodec {
 	var req Req
 	var res Res
 
 	ec := EndpointCodec{
-		Endpoint:   MakeStandardEndpoint(method),
-		Decode:     DecodeRequest[Req],
-		ParamNames: FieldNames(req),
-		Help:       help,
-
+		Endpoint:     MakeStandardEndpoint(method),
+		Decode:       DecodeRequest[Req],
+		Help:         help,
+		ParamNames:   FieldNames(req),
 		requestType:  reflect.TypeOf(req),
 		responseType: reflect.TypeOf(res),
 	}
@@ -182,15 +209,28 @@ func MakeStandardEndpointCodec[Req any, Res any](method StandardMethod[Req, Res]
 
 // MakeVoidEndpointCodec creates an EndpointCodec for methods that return no value.
 // The generated metadata will include "void": true on the response type.
-func MakeVoidEndpointCodec[Req any](method VoidMethod[Req], help string, opts ...EndpointCodecOption) EndpointCodec {
+func MakeVoidEndpointCodec[Req any](
+	method VoidMethod[Req],
+	help string,
+	opts ...EndpointCodecOption,
+) EndpointCodec {
+	return makeVoidEndpointCodec(method, help, opts)
+}
+
+// MakeGeneratedVoidEndpointCodec creates a void EndpointCodec whose help comes
+// from GeneratedDocs supplied to NewService.
+func MakeGeneratedVoidEndpointCodec[Req any](method VoidMethod[Req], opts ...EndpointCodecOption) EndpointCodec {
+	return makeVoidEndpointCodec(method, "", opts)
+}
+
+func makeVoidEndpointCodec[Req any](method VoidMethod[Req], help string, opts []EndpointCodecOption) EndpointCodec {
 	var req Req
 
 	ec := EndpointCodec{
-		Endpoint:   MakeVoidEndpoint(method),
-		Decode:     DecodeRequest[Req],
-		ParamNames: FieldNames(req),
-		Help:       help,
-
+		Endpoint:     MakeVoidEndpoint(method),
+		Decode:       DecodeRequest[Req],
+		Help:         help,
+		ParamNames:   FieldNames(req),
 		requestType:  reflect.TypeOf(req),
 		responseType: nil,
 		voidResponse: true,
