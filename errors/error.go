@@ -107,3 +107,8 @@ func Is(err, target error) bool {
 func Unwrap(err error) error {
 	return errors.Unwrap(err)
 }
+
+// New is a re-export of [errors.New] for convenience.
+func New(text string) error {
+	return errors.New(text)
+}
