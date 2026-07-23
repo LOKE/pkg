@@ -15,14 +15,13 @@ Current packages:
 messages, tests, examples, and documentation — is visible to the entire
 internet.**
 
-Before you push, please make sure you are **not** committing:
+The usual hygiene applies (no secrets, credentials, or customer data — same as
+any repo). On top of that, because this one is public, don't commit things that
+would be fine in a private repo but shouldn't be seen outside LOKE:
 
-- Secrets or credentials of any kind — API keys, tokens, passwords, private
-  keys, connection strings, `.env` files.
 - Internal hostnames, IP addresses, or infrastructure details.
-- Customer or personal data.
 - Proprietary or commercially sensitive business logic.
-- Internal-only URLs, ticket references, or anything that would leak how our
+- Internal-only URLs, ticket references, or anything that reveals how our
   private systems work.
 
 If you're ever unsure whether something is safe to make public, **don't push
