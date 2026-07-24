@@ -7,15 +7,20 @@ A collection of small, general-purpose Go packages shared across LOKE services.
 See the [package documentation on pkg.go.dev](https://pkg.go.dev/github.com/LOKE/pkg)
 for the full list of packages and what each one is for.
 
+These packages are open source under the [MIT licence](./LICENCE), so anyone is
+welcome to use them in their own projects — you don't need to be at LOKE. The
+guidance below is aimed at LOKE engineers contributing to this repo.
+
 ## ⚠️ This is a public repository
 
-**This repository is public. Anything you commit here — code, comments, commit
+**This repository is public. Anything committed here — code, comments, commit
 messages, tests, examples, and documentation — is visible to the entire
 internet.**
 
-The usual hygiene applies (no secrets, credentials, or customer data — same as
-any repo). On top of that, because this one is public, don't commit things that
-would be fine in a private repo but shouldn't be seen outside LOKE:
+If you're contributing, the usual hygiene applies (no secrets, credentials, or
+customer data — same as any repo). On top of that, because this one is public,
+don't commit things that would be fine in a private repo but shouldn't be seen
+outside LOKE:
 
 - Internal hostnames, IP addresses, or infrastructure details.
 - Proprietary or commercially sensitive business logic.
