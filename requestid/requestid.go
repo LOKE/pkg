@@ -1,3 +1,6 @@
+// Package requestid generates request IDs and propagates them through a
+// context.Context, sourcing the ID from the incoming X-Request-ID header or
+// generating a new one.
 package requestid
 
 import (

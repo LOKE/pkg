@@ -2,12 +2,10 @@
 
 A collection of small, general-purpose Go packages shared across LOKE services.
 
-Current packages:
+[![Go Reference](https://pkg.go.dev/badge/github.com/LOKE/pkg.svg)](https://pkg.go.dev/github.com/LOKE/pkg)
 
-- **`errors`** — helpers for inspecting errors, including whether an error is safe to expose publicly (`IsPublic`) and reading a machine-readable `ErrorCode` off an error value.
-- **`log`** — a systemd/syslog logger that prefixes go-kit log lines with the appropriate syslog priority level, so log levels are picked up correctly by the journal.
-- **`lokerpc`** — LOKE's JSON-RPC HTTP server and client, including request schemas, Prometheus request metrics, and code generation for typed clients.
-- **`requestid`** — request ID generation and propagation, carrying an ID (from the incoming `X-Request-ID` header or newly generated) through `context.Context`.
+See the [package documentation on pkg.go.dev](https://pkg.go.dev/github.com/LOKE/pkg)
+for the full list of packages and what each one is for.
 
 ## ⚠️ This is a public repository
 

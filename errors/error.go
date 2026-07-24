@@ -1,3 +1,6 @@
+// Package errors provides helpers for inspecting errors, including whether an
+// error is safe to expose publicly and reading a machine-readable error code
+// off an error value.
 package errors
 
 import (
