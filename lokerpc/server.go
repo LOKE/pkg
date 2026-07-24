@@ -1,4 +1,4 @@
-// Package lokerpc implements LOKE's JSON-RPC HTTP server and client, including
+// Package lokerpc implements LOKE's HTTP RPC server and client, including
 // request schemas, Prometheus request metrics, and code generation for typed
 // clients.
 package lokerpc
