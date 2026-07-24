@@ -1,4 +1,7 @@
-package syslog
+// Package log provides a systemd/syslog logger that prefixes go-kit log lines
+// with the appropriate syslog priority level, so log levels are picked up
+// correctly by the journal.
+package log
 
 import (
 	"bytes"

@@ -1,4 +1,4 @@
-package syslog_test
+package log_test
 
 import (
 	"bytes"
