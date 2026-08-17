@@ -85,11 +85,7 @@ type resolvedMethod struct {
 	isNullable bool
 }
 
-// schemaIsNullable reports whether schema is nullable. It checks the schema's
-// own Nullable flag first, then falls back to the referenced definition's
-// Nullable flag — normalise() hoists inline schemas (Nullable included) into
-// named definitions and replaces the original with a bare ref, so a hoisted
-// response's nullability only survives on the definition it now points to.
+// schemaIsNullable reports whether schema, or the definition it refs, is nullable.
 func schemaIsNullable(schema jtd.Schema, defs map[string]jtd.Schema) bool {
 	if schema.Nullable {
 		return true

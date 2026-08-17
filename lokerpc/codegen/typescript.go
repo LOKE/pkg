@@ -145,12 +145,9 @@ func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
 	return b.Flush()
 }
 
-// normalise sorts interfaces for deterministic output and hoists any inline
-// request/response schema into a named definition so it can be referenced by
-// a Go/TS type name. It returns the definition order, plus the set of names
-// it synthesized via hoisting (as opposed to names that already existed in
-// the source meta.Definitions) — callers use this to distinguish a schema
-// author's deliberate named type from a codegen implementation detail.
+// normalise sorts interfaces for deterministic output and hoists inline
+// request/response schemas into named definitions. It returns the definition
+// order plus the set of names it synthesized via hoisting.
 func normalise(meta *lokerpc.Meta) ([]string, map[string]bool) {
 	var defOrder []string
 	hoisted := map[string]bool{}
