@@ -3,16 +3,6 @@
   "help": "",
   "multiArg": false,
   "definitions": {
-    "GetUserResponse": {
-      "properties": {
-        "name": { "type": "string" }
-      }
-    },
-    "GetUserRequest": {
-      "properties": {
-        "name": { "type": "string" }
-      }
-    },
     "Widget": {
       "properties": {
         "id": { "type": "string" }

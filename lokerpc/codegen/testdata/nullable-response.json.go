@@ -6,14 +6,6 @@ import (
 	"github.com/LOKE/pkg/lokerpc"
 )
 
-type GetUserRequest struct {
-	Name string `json:"name"`
-}
-
-type GetUserResponse struct {
-	Name string `json:"name"`
-}
-
 type NullableGadget *struct {
 	ID string `json:"id"`
 }
@@ -26,11 +18,11 @@ type GetNicknameResponse string
 
 type GetTagsResponse []string
 
-type GetUserRequest_ struct {
+type GetUserRequest struct {
 	ID string `json:"id"`
 }
 
-type GetUserResponse_ struct {
+type GetUserResponse struct {
 	ID string `json:"id"`
 }
 
@@ -38,7 +30,7 @@ type TypedService interface {
 	GetGadget(context.Context, any) (NullableGadget, error)
 	GetNickname(context.Context, any) (*GetNicknameResponse, error)
 	GetTags(context.Context, any) (*GetTagsResponse, error)
-	GetUser(context.Context, GetUserRequest_) (*GetUserResponse_, error)
+	GetUser(context.Context, GetUserRequest) (*GetUserResponse, error)
 	GetWidget(context.Context, any) (*Widget, error)
 }
 
@@ -70,8 +62,8 @@ func (c TypedRPCClient) GetTags(ctx context.Context, req any) (*GetTagsResponse,
 	}
 	return res, nil
 }
-func (c TypedRPCClient) GetUser(ctx context.Context, req GetUserRequest_) (*GetUserResponse_, error) {
-	var res *GetUserResponse_
+func (c TypedRPCClient) GetUser(ctx context.Context, req GetUserRequest) (*GetUserResponse, error) {
+	var res *GetUserResponse
 	err := c.DoRequest(ctx, "getUser", req, &res)
 	if err != nil {
 		return nil, err
