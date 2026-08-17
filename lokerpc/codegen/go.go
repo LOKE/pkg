@@ -96,12 +96,30 @@ func schemaIsNullable(schema jtd.Schema, defs map[string]jtd.Schema) bool {
 	return false
 }
 
+// refAlreadyPointer reports whether resolvedType already denotes a pointer,
+// either directly or via a ref to a pre-existing (non-hoisted) definition
+func refAlreadyPointer(schema jtd.Schema, resolvedType string, defs map[string]jtd.Schema, hoisted map[string]bool, imports map[string]struct{}) bool {
+	if strings.HasPrefix(resolvedType, "*") {
+		return true
+	}
+	if schema.Ref != nil && !hoisted[*schema.Ref] {
+		return strings.HasPrefix(GenGoType(defs[*schema.Ref], imports), "*")
+	}
+	return false
+}
+
 // resolveMethodTypes determines the Go request and response types for an endpoint,
 // including whether the method has a void return type.
 func resolveMethodTypes(v lokerpc.EndpointMeta, defs map[string]jtd.Schema, hoisted map[string]bool, imports map[string]struct{}) resolvedMethod {
 	reqType := "any"
 	if v.RequestTypeDef != nil {
 		reqType = GenGoType(*v.RequestTypeDef, imports)
+
+		// Unlike responses, requests aren't wrapped in "*" by default — only
+		// when the schema is actually nullable.
+		if schemaIsNullable(*v.RequestTypeDef, defs) && !refAlreadyPointer(*v.RequestTypeDef, reqType, defs, hoisted, imports) {
+			reqType = "*" + reqType
+		}
 	}
 
 	resType := "any"
@@ -117,11 +135,7 @@ func resolveMethodTypes(v lokerpc.EndpointMeta, defs map[string]jtd.Schema, hois
 
 			// A ref to a pre-existing nullable definition already renders as a
 			// pointer type, so don't stack another "*" on top.
-			alreadyPointer := strings.HasPrefix(resType, "*")
-			if !alreadyPointer && v.ResponseTypeDef.Ref != nil && !hoisted[*v.ResponseTypeDef.Ref] {
-				refType := GenGoType(defs[*v.ResponseTypeDef.Ref], imports)
-				alreadyPointer = strings.HasPrefix(refType, "*")
-			}
+			alreadyPointer := refAlreadyPointer(*v.ResponseTypeDef, resType, defs, hoisted, imports)
 
 			if !alreadyPointer && !strings.HasPrefix(resType, "[]") && !strings.HasPrefix(resType, "map[") {
 				resType = "*" + resType

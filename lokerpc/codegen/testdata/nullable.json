@@ -69,6 +69,49 @@
         "elements": { "type": "string" },
         "nullable": true
       }
+    },
+    {
+      "help": "nullable inline request",
+      "methodName": "setNickname",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": {
+        "properties": { "id": { "type": "string" } },
+        "nullable": true
+      },
+      "responseTypeDef": { "metadata": { "void": true } }
+    },
+    {
+      "help": "ref with nullable set on the ref usage itself, pointing at a non-nullable definition (request side)",
+      "methodName": "setWidget",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": {
+        "ref": "Widget",
+        "nullable": true
+      },
+      "responseTypeDef": { "metadata": { "void": true } }
+    },
+    {
+      "help": "nullable scalar request",
+      "methodName": "setTitle",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": {
+        "type": "string",
+        "nullable": true
+      },
+      "responseTypeDef": { "metadata": { "void": true } }
+    },
+    {
+      "help": "ref (not itself marked nullable) pointing at a definition that is nullable (request side)",
+      "methodName": "setGadget",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": {
+        "ref": "NullableGadget"
+      },
+      "responseTypeDef": { "metadata": { "void": true } }
     }
   ]
 }

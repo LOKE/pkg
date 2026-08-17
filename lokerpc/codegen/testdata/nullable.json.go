@@ -26,12 +26,22 @@ type GetUserResponse struct {
 	ID string `json:"id"`
 }
 
+type SetNicknameRequest struct {
+	ID string `json:"id"`
+}
+
+type SetTitleRequest string
+
 type TypedService interface {
 	GetGadget(context.Context, any) (NullableGadget, error)
 	GetNickname(context.Context, any) (*GetNicknameResponse, error)
 	GetTags(context.Context, any) (*GetTagsResponse, error)
 	GetUser(context.Context, GetUserRequest) (*GetUserResponse, error)
 	GetWidget(context.Context, any) (*Widget, error)
+	SetGadget(context.Context, NullableGadget) error
+	SetNickname(context.Context, *SetNicknameRequest) error
+	SetTitle(context.Context, *SetTitleRequest) error
+	SetWidget(context.Context, *Widget) error
 }
 
 type TypedRPCClient struct {
@@ -77,4 +87,16 @@ func (c TypedRPCClient) GetWidget(ctx context.Context, req any) (*Widget, error)
 		return nil, err
 	}
 	return res, nil
+}
+func (c TypedRPCClient) SetGadget(ctx context.Context, req NullableGadget) error {
+	return c.DoRequest(ctx, "setGadget", req, nil)
+}
+func (c TypedRPCClient) SetNickname(ctx context.Context, req *SetNicknameRequest) error {
+	return c.DoRequest(ctx, "setNickname", req, nil)
+}
+func (c TypedRPCClient) SetTitle(ctx context.Context, req *SetTitleRequest) error {
+	return c.DoRequest(ctx, "setTitle", req, nil)
+}
+func (c TypedRPCClient) SetWidget(ctx context.Context, req *Widget) error {
+	return c.DoRequest(ctx, "setWidget", req, nil)
 }

@@ -21,6 +21,12 @@ export type GetUserResponse = {
   id: string;
 } | null;
 
+export type SetNicknameRequest = {
+  id: string;
+} | null;
+
+export type SetTitleRequest = string | null;
+
 /**
  * 
  */
@@ -57,5 +63,29 @@ export class TypedService extends RPCContextClient {
    */
   getWidget(ctx: Context, req: any): Promise<Widget | null> {
     return this.request(ctx, "getWidget", req);
+  }
+  /**
+   * ref (not itself marked nullable) pointing at a definition that is nullable (request side)
+   */
+  setGadget(ctx: Context, req: NullableGadget): Promise<void> {
+    return this.request(ctx, "setGadget", req);
+  }
+  /**
+   * nullable inline request
+   */
+  setNickname(ctx: Context, req: SetNicknameRequest): Promise<void> {
+    return this.request(ctx, "setNickname", req);
+  }
+  /**
+   * nullable scalar request
+   */
+  setTitle(ctx: Context, req: SetTitleRequest): Promise<void> {
+    return this.request(ctx, "setTitle", req);
+  }
+  /**
+   * ref with nullable set on the ref usage itself, pointing at a non-nullable definition (request side)
+   */
+  setWidget(ctx: Context, req: Widget | null): Promise<void> {
+    return this.request(ctx, "setWidget", req);
   }
 }
