@@ -82,11 +82,29 @@ type resolvedMethod struct {
 	reqType string
 	resType string
 	isVoid  bool
+	// isNullable is true when the response schema itself is nullable (as opposed
+	// to resType merely being auto-wrapped in "*" for API convenience).
+	isNullable bool
+}
+
+// schemaIsNullable reports whether schema is nullable. It checks the schema's
+// own Nullable flag first, then falls back to the referenced definition's
+// Nullable flag — normalise() hoists inline schemas (Nullable included) into
+// named definitions and replaces the original with a bare ref, so a hoisted
+// response's nullability only survives on the definition it now points to.
+func schemaIsNullable(schema jtd.Schema, defs map[string]jtd.Schema) bool {
+	if schema.Nullable {
+		return true
+	}
+	if schema.Ref != nil {
+		return defs[*schema.Ref].Nullable
+	}
+	return false
 }
 
 // resolveMethodTypes determines the Go request and response types for an endpoint,
 // including whether the method has a void return type.
-func resolveMethodTypes(v lokerpc.EndpointMeta, imports map[string]struct{}) resolvedMethod {
+func resolveMethodTypes(v lokerpc.EndpointMeta, defs map[string]jtd.Schema, imports map[string]struct{}) resolvedMethod {
 	reqType := "any"
 	if v.RequestTypeDef != nil {
 		reqType = GenGoType(*v.RequestTypeDef, imports)
@@ -94,12 +112,14 @@ func resolveMethodTypes(v lokerpc.EndpointMeta, imports map[string]struct{}) res
 
 	resType := "any"
 	isVoid := false
+	isNullable := false
 	if v.ResponseTypeDef != nil {
 		if v.ResponseTypeDef.Metadata["void"] == true {
 			isVoid = true
 			resType = ""
 		} else {
 			resType = GenGoType(*v.ResponseTypeDef, imports)
+			isNullable = schemaIsNullable(*v.ResponseTypeDef, defs)
 
 			if !strings.HasPrefix(resType, "[]") && !strings.HasPrefix(resType, "map[") && !strings.HasPrefix(resType, "*") {
 				resType = "*" + resType
@@ -107,7 +127,7 @@ func resolveMethodTypes(v lokerpc.EndpointMeta, imports map[string]struct{}) res
 		}
 	}
 
-	return resolvedMethod{reqType: reqType, resType: resType, isVoid: isVoid}
+	return resolvedMethod{reqType: reqType, resType: resType, isVoid: isVoid, isNullable: isNullable}
 }
 
 func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
@@ -129,7 +149,7 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 	// goDocComment(b, meta.Help, "")
 	b.WriteString("type " + goFieldName(meta.ServiceName) + "Service interface {\n")
 	for _, v := range meta.Interfaces {
-		m := resolveMethodTypes(v, imports)
+		m := resolveMethodTypes(v, meta.Definitions, imports)
 
 		// goDocComment(b, v.Help, "\t")
 		if m.isVoid {
@@ -145,7 +165,7 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 	// goDocComment(b, meta.Help, "")
 	b.WriteString("type " + goFieldName(meta.ServiceName) + "RPCClient struct{\nlokerpc.Client}\n\n")
 	for _, v := range meta.Interfaces {
-		m := resolveMethodTypes(v, imports)
+		m := resolveMethodTypes(v, meta.Definitions, imports)
 
 		if m.isVoid {
 			fmt.Fprintf(&b, "func (c %sRPCClient) %s(ctx context.Context, req %s) error {\n", goFieldName(meta.ServiceName), goFieldName(v.MethodName), m.reqType)
@@ -153,7 +173,7 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 			fmt.Fprintf(&b, "}\n")
 		} else {
 			varType := m.resType
-			if varType != "any" && strings.HasPrefix(varType, "*") {
+			if !m.isNullable && varType != "any" && strings.HasPrefix(varType, "*") {
 				varType = varType[1:]
 			}
 
@@ -163,7 +183,7 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 			fmt.Fprintf(&b, "\tif err != nil {\n")
 			fmt.Fprintf(&b, "\t\treturn nil, err\n")
 			fmt.Fprintf(&b, "\t}\n")
-			if m.resType == "any" {
+			if m.resType == "any" || m.isNullable {
 				fmt.Fprintf(&b, "\treturn res, nil\n")
 			} else if strings.HasPrefix(m.resType, "*") {
 				fmt.Fprintf(&b, "\treturn &res, nil\n")

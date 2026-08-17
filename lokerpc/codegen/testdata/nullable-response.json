@@ -1,0 +1,84 @@
+{
+  "serviceName": "typed",
+  "help": "",
+  "multiArg": false,
+  "definitions": {
+    "GetUserResponse": {
+      "properties": {
+        "name": { "type": "string" }
+      }
+    },
+    "GetUserRequest": {
+      "properties": {
+        "name": { "type": "string" }
+      }
+    },
+    "Widget": {
+      "properties": {
+        "id": { "type": "string" }
+      }
+    },
+    "NullableGadget": {
+      "properties": {
+        "id": { "type": "string" }
+      },
+      "nullable": true
+    }
+  },
+  "interfaces": [
+    {
+      "help": "inline nullable with properties",
+      "methodName": "getUser",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": { "properties": { "id": { "type": "string" } } },
+      "responseTypeDef": {
+        "properties": { "id": { "type": "string" } },
+        "nullable": true
+      }
+    },
+    {
+      "help": "ref with nullable set on the ref usage itself, pointing at a non-nullable definition",
+      "methodName": "getWidget",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": {},
+      "responseTypeDef": {
+        "ref": "Widget",
+        "nullable": true
+      }
+    },
+    {
+      "help": "ref (not itself marked nullable) pointing at a definition that is nullable",
+      "methodName": "getGadget",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": {},
+      "responseTypeDef": {
+        "ref": "NullableGadget"
+      }
+    },
+    {
+      "help": "nullable scalar response",
+      "methodName": "getNickname",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": {},
+      "responseTypeDef": {
+        "type": "string",
+        "nullable": true
+      }
+    },
+    {
+      "help": "nullable array response",
+      "methodName": "getTags",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": {},
+      "responseTypeDef": {
+        "elements": { "type": "string" },
+        "nullable": true
+      }
+    }
+  ]
+}
