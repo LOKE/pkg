@@ -79,11 +79,9 @@ func GenGoType(schema jtd.Schema, imports map[string]struct{}) string {
 }
 
 type resolvedMethod struct {
-	reqType string
-	resType string
-	isVoid  bool
-	// isNullable is true when the response schema itself is nullable (as opposed
-	// to resType merely being auto-wrapped in "*" for API convenience).
+	reqType    string
+	resType    string
+	isVoid     bool
 	isNullable bool
 }
 
@@ -121,13 +119,8 @@ func resolveMethodTypes(v lokerpc.EndpointMeta, defs map[string]jtd.Schema, hois
 			resType = GenGoType(*v.ResponseTypeDef, imports)
 			isNullable = schemaIsNullable(*v.ResponseTypeDef, defs)
 
-			// A ref to a pre-existing (non-hoisted) definition whose own schema is
-			// nullable already renders as a pointer type (see the "type X
-			// *Underlying" definitions emitted below), so resType already denotes
-			// a pointer even without a literal "*" here — don't stack another one
-			// on top. Hoisted definitions never render this way (see the
-			// definitions loop in GenGoClient), so they always need the "*" added
-			// here at the usage site instead.
+			// A ref to a pre-existing nullable definition already renders as a
+			// pointer type, so don't stack another "*" on top.
 			alreadyPointer := strings.HasPrefix(resType, "*")
 			if !alreadyPointer && v.ResponseTypeDef.Ref != nil && !hoisted[*v.ResponseTypeDef.Ref] {
 				refType := GenGoType(defs[*v.ResponseTypeDef.Ref], imports)
@@ -156,11 +149,8 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 		b.WriteString("\n")
 		def := meta.Definitions[k]
 		if hoisted[k] {
-			// Hoisted definitions are an implementation detail of normalise()
-			// giving an anonymous inline schema a Go name — they aren't a
-			// schema author's deliberate nullable type, so don't bake a "*"
-			// into the type itself. Nullability instead shows up as "*Name"
-			// at each usage site (see resolveMethodTypes).
+			// Hoisted types shouldn't bake in "*" — nullability shows up as
+			// "*Name" at each usage site instead (see resolveMethodTypes).
 			def.Nullable = false
 		}
 		fmt.Fprintf(&b, "type %s %s;\n", goFieldName(k), GenGoType(def, imports))
