@@ -22,20 +22,20 @@ type Widget struct {
 	ID string `json:"id"`
 }
 
-type GetNicknameResponse *string
+type GetNicknameResponse string
 
-type GetTagsResponse *[]string
+type GetTagsResponse []string
 
 type GetUserRequest_ struct {
 	ID string `json:"id"`
 }
 
-type GetUserResponse_ *struct {
+type GetUserResponse_ struct {
 	ID string `json:"id"`
 }
 
 type TypedService interface {
-	GetGadget(context.Context, any) (*NullableGadget, error)
+	GetGadget(context.Context, any) (NullableGadget, error)
 	GetNickname(context.Context, any) (*GetNicknameResponse, error)
 	GetTags(context.Context, any) (*GetTagsResponse, error)
 	GetUser(context.Context, GetUserRequest_) (*GetUserResponse_, error)
@@ -46,8 +46,8 @@ type TypedRPCClient struct {
 	lokerpc.Client
 }
 
-func (c TypedRPCClient) GetGadget(ctx context.Context, req any) (*NullableGadget, error) {
-	var res *NullableGadget
+func (c TypedRPCClient) GetGadget(ctx context.Context, req any) (NullableGadget, error) {
+	var res NullableGadget
 	err := c.DoRequest(ctx, "getGadget", req, &res)
 	if err != nil {
 		return nil, err

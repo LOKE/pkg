@@ -104,7 +104,7 @@ func schemaIsNullable(schema jtd.Schema, defs map[string]jtd.Schema) bool {
 
 // resolveMethodTypes determines the Go request and response types for an endpoint,
 // including whether the method has a void return type.
-func resolveMethodTypes(v lokerpc.EndpointMeta, defs map[string]jtd.Schema, imports map[string]struct{}) resolvedMethod {
+func resolveMethodTypes(v lokerpc.EndpointMeta, defs map[string]jtd.Schema, hoisted map[string]bool, imports map[string]struct{}) resolvedMethod {
 	reqType := "any"
 	if v.RequestTypeDef != nil {
 		reqType = GenGoType(*v.RequestTypeDef, imports)
@@ -121,7 +121,20 @@ func resolveMethodTypes(v lokerpc.EndpointMeta, defs map[string]jtd.Schema, impo
 			resType = GenGoType(*v.ResponseTypeDef, imports)
 			isNullable = schemaIsNullable(*v.ResponseTypeDef, defs)
 
-			if !strings.HasPrefix(resType, "[]") && !strings.HasPrefix(resType, "map[") && !strings.HasPrefix(resType, "*") {
+			// A ref to a pre-existing (non-hoisted) definition whose own schema is
+			// nullable already renders as a pointer type (see the "type X
+			// *Underlying" definitions emitted below), so resType already denotes
+			// a pointer even without a literal "*" here — don't stack another one
+			// on top. Hoisted definitions never render this way (see the
+			// definitions loop in GenGoClient), so they always need the "*" added
+			// here at the usage site instead.
+			alreadyPointer := strings.HasPrefix(resType, "*")
+			if !alreadyPointer && v.ResponseTypeDef.Ref != nil && !hoisted[*v.ResponseTypeDef.Ref] {
+				refType := GenGoType(defs[*v.ResponseTypeDef.Ref], imports)
+				alreadyPointer = strings.HasPrefix(refType, "*")
+			}
+
+			if !alreadyPointer && !strings.HasPrefix(resType, "[]") && !strings.HasPrefix(resType, "map[") {
 				resType = "*" + resType
 			}
 		}
@@ -131,7 +144,7 @@ func resolveMethodTypes(v lokerpc.EndpointMeta, defs map[string]jtd.Schema, impo
 }
 
 func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
-	defOrder := normalise(&meta)
+	defOrder, hoisted := normalise(&meta)
 
 	imports := map[string]struct{}{
 		"context": {},
@@ -141,7 +154,16 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 
 	for _, k := range defOrder {
 		b.WriteString("\n")
-		fmt.Fprintf(&b, "type %s %s;\n", goFieldName(k), GenGoType(meta.Definitions[k], imports))
+		def := meta.Definitions[k]
+		if hoisted[k] {
+			// Hoisted definitions are an implementation detail of normalise()
+			// giving an anonymous inline schema a Go name — they aren't a
+			// schema author's deliberate nullable type, so don't bake a "*"
+			// into the type itself. Nullability instead shows up as "*Name"
+			// at each usage site (see resolveMethodTypes).
+			def.Nullable = false
+		}
+		fmt.Fprintf(&b, "type %s %s;\n", goFieldName(k), GenGoType(def, imports))
 	}
 
 	// Service interface
@@ -149,7 +171,7 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 	// goDocComment(b, meta.Help, "")
 	b.WriteString("type " + goFieldName(meta.ServiceName) + "Service interface {\n")
 	for _, v := range meta.Interfaces {
-		m := resolveMethodTypes(v, meta.Definitions, imports)
+		m := resolveMethodTypes(v, meta.Definitions, hoisted, imports)
 
 		// goDocComment(b, v.Help, "\t")
 		if m.isVoid {
@@ -165,7 +187,7 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 	// goDocComment(b, meta.Help, "")
 	b.WriteString("type " + goFieldName(meta.ServiceName) + "RPCClient struct{\nlokerpc.Client}\n\n")
 	for _, v := range meta.Interfaces {
-		m := resolveMethodTypes(v, meta.Definitions, imports)
+		m := resolveMethodTypes(v, meta.Definitions, hoisted, imports)
 
 		if m.isVoid {
 			fmt.Fprintf(&b, "func (c %sRPCClient) %s(ctx context.Context, req %s) error {\n", goFieldName(meta.ServiceName), goFieldName(v.MethodName), m.reqType)
