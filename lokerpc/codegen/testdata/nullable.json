@@ -112,6 +112,17 @@
         "ref": "NullableGadget"
       },
       "responseTypeDef": { "metadata": { "void": true } }
+    },
+    {
+      "help": "nullable array request",
+      "methodName": "setTags",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": {
+        "elements": { "type": "string" },
+        "nullable": true
+      },
+      "responseTypeDef": { "metadata": { "void": true } }
     }
   ]
 }

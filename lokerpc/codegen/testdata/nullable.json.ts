@@ -25,6 +25,8 @@ export type SetNicknameRequest = {
   id: string;
 } | null;
 
+export type SetTagsRequest = string[] | null;
+
 export type SetTitleRequest = string | null;
 
 /**
@@ -75,6 +77,12 @@ export class TypedService extends RPCContextClient {
    */
   setNickname(ctx: Context, req: SetNicknameRequest): Promise<void> {
     return this.request(ctx, "setNickname", req);
+  }
+  /**
+   * nullable array request
+   */
+  setTags(ctx: Context, req: SetTagsRequest): Promise<void> {
+    return this.request(ctx, "setTags", req);
   }
   /**
    * nullable scalar request

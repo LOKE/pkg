@@ -30,6 +30,8 @@ type SetNicknameRequest struct {
 	ID string `json:"id"`
 }
 
+type SetTagsRequest []string
+
 type SetTitleRequest string
 
 type TypedService interface {
@@ -40,6 +42,7 @@ type TypedService interface {
 	GetWidget(context.Context, any) (*Widget, error)
 	SetGadget(context.Context, NullableGadget) error
 	SetNickname(context.Context, *SetNicknameRequest) error
+	SetTags(context.Context, *SetTagsRequest) error
 	SetTitle(context.Context, *SetTitleRequest) error
 	SetWidget(context.Context, *Widget) error
 }
@@ -93,6 +96,9 @@ func (c TypedRPCClient) SetGadget(ctx context.Context, req NullableGadget) error
 }
 func (c TypedRPCClient) SetNickname(ctx context.Context, req *SetNicknameRequest) error {
 	return c.DoRequest(ctx, "setNickname", req, nil)
+}
+func (c TypedRPCClient) SetTags(ctx context.Context, req *SetTagsRequest) error {
+	return c.DoRequest(ctx, "setTags", req, nil)
 }
 func (c TypedRPCClient) SetTitle(ctx context.Context, req *SetTitleRequest) error {
 	return c.DoRequest(ctx, "setTitle", req, nil)
