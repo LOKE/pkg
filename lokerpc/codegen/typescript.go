@@ -101,7 +101,7 @@ func GenTypescriptType(schema jtd.Schema) string {
 }
 
 func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
-	defOrder := normalise(&meta)
+	defOrder, _ := normalise(&meta)
 
 	b := bufio.NewWriter(w)
 
@@ -145,8 +145,12 @@ func GenTypescriptClient(w io.Writer, meta lokerpc.Meta) error {
 	return b.Flush()
 }
 
-func normalise(meta *lokerpc.Meta) []string {
+// normalise sorts interfaces for deterministic output and hoists inline
+// request/response schemas into named definitions. It returns the definition
+// order plus the set of names it synthesized via hoisting.
+func normalise(meta *lokerpc.Meta) ([]string, map[string]bool) {
 	var defOrder []string
+	hoisted := map[string]bool{}
 
 	// Sort methods so codegen output is deterministic. The server builds
 	// meta.Interfaces from a map, so its incoming order is random.
@@ -172,6 +176,7 @@ func normalise(meta *lokerpc.Meta) []string {
 			meta.Definitions[name] = *v.RequestTypeDef
 			meta.Interfaces[i].RequestTypeDef = &jtd.Schema{Ref: &name}
 			defOrder = append(defOrder, name)
+			hoisted[name] = true
 		}
 
 		if v.ResponseTypeDef != nil && v.ResponseTypeDef.Ref == nil && v.ResponseTypeDef.Form() != jtd.FormEmpty {
@@ -185,10 +190,11 @@ func normalise(meta *lokerpc.Meta) []string {
 			meta.Definitions[name] = *v.ResponseTypeDef
 			meta.Interfaces[i].ResponseTypeDef = &jtd.Schema{Ref: &name}
 			defOrder = append(defOrder, name)
+			hoisted[name] = true
 		}
 	}
 
-	return defOrder
+	return defOrder, hoisted
 }
 
 func tsDocComment(w io.Writer, text string, indent string) {
