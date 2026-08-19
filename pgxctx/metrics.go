@@ -5,6 +5,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+// NewPrometheusCollector returns a prometheus.Collector that collects metrics
+// from the given pgx pool. It collects connection state metrics such as
+// constructing, acquired, and idle connections. The returned collector should
+// be registered with the prometheus client.
 func NewPrometheusCollector(pool *pgxpool.Pool) prometheus.Collector {
 	return statsCollector{pool: pool}
 }

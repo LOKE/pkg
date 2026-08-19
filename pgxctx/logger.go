@@ -11,6 +11,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+// NewLogger returns a new pgx.QueryTracer that logs slow queries and query
+// durations using the given logger and prometheus registerer.
+// The returned tracer should be set on the pgx connection pool.
 func NewLogger(logger log.Logger, reg prometheus.Registerer) (pgx.QueryTracer, error) {
 	latency := prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "pgx_sql_query_duration_seconds",
