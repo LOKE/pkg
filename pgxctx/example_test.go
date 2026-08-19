@@ -22,6 +22,9 @@ func Example() {
 		log.WithPrefix(logger, "service", "pg-pool"),
 		prometheus.DefaultRegisterer,
 	)
+	if err != nil {
+		panic(err)
+	}
 
 	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	if err != nil {
