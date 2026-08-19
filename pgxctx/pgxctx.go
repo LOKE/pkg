@@ -1,3 +1,5 @@
+// Package pgxctx provides utilities for using recording slow query metrics and
+// logging for pgxpool.
 package pgxctx
 
 import (
