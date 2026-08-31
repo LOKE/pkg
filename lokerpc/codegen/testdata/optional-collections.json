@@ -1,0 +1,37 @@
+{
+  "serviceName": "discounts",
+  "help": "Optional properties: omitzero for collections and timestamps, omitempty otherwise",
+  "multiArg": false,
+  "definitions": {
+    "Customer": {
+      "properties": {
+        "customerId": { "type": "string" },
+        "uid": { "type": "string" }
+      },
+      "optionalProperties": {
+        "guest": { "type": "boolean" },
+        "name": { "type": "string" },
+        "tags": { "elements": { "type": "string" } },
+        "scores": { "values": { "type": "int32" } },
+        "nullableTags": { "elements": { "type": "string" }, "nullable": true },
+        "seenAt": { "type": "timestamp" },
+        "coords": {
+          "properties": {
+            "lat": { "type": "float32" },
+            "lng": { "type": "float32" }
+          }
+        }
+      }
+    }
+  },
+  "interfaces": [
+    {
+      "help": "Lock a discount for a customer",
+      "methodName": "lockDiscount",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": { "ref": "Customer" },
+      "responseTypeDef": { "ref": "Customer" }
+    }
+  ]
+}

@@ -11,6 +11,25 @@ import (
 	jtd "github.com/jsontypedef/json-typedef-go"
 )
 
+// omitTag picks the JSON omit option for an optional property. Slices, maps and
+// time.Time have no meaningful omitempty behaviour — empty collections would be
+// dropped and a zero time would always be sent — so they use omitzero, which
+// requires Go 1.24 in consumers.
+func omitTag(schema jtd.Schema) string {
+	if schema.Nullable {
+		return "omitempty"
+	}
+	switch schema.Form() {
+	case jtd.FormElements, jtd.FormValues:
+		return "omitzero"
+	case jtd.FormType:
+		if schema.Type == jtd.TypeTimestamp {
+			return "omitzero"
+		}
+	}
+	return "omitempty"
+}
+
 func GenGoType(schema jtd.Schema, imports map[string]struct{}) string {
 	var t string
 
@@ -58,7 +77,8 @@ func GenGoType(schema jtd.Schema, imports map[string]struct{}) string {
 			t += "\t" + goFieldName(k) + " " + GenGoType(schema.Properties[k], imports) + "`json:\"" + k + "\"`\n"
 		}
 		for _, k := range sortedKeys(schema.OptionalProperties) {
-			t += "\t" + goFieldName(k) + " " + GenGoType(schema.OptionalProperties[k], imports) + "`json:\"" + k + ",omitempty\"`\n"
+			prop := schema.OptionalProperties[k]
+			t += "\t" + goFieldName(k) + " " + GenGoType(prop, imports) + "`json:\"" + k + "," + omitTag(prop) + "\"`\n"
 		}
 		t += "}"
 	case jtd.FormDiscriminator:
