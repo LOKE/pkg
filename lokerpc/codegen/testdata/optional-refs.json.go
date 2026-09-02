@@ -11,7 +11,7 @@ type Count int32
 
 type CountAlias Count
 
-type CreatedAt time.Time
+type CreatedAt = time.Time
 
 type Filter struct {
 	Count       *Count      `json:"count,omitempty"`

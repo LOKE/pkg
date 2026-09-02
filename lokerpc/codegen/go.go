@@ -80,7 +80,8 @@ func genGoType(schema jtd.Schema, defs map[string]jtd.Schema, imports map[string
 
 	for _, k := range sortedKeys(schema.Definitions) {
 		t += "\n"
-		t += "type " + goFieldName(k) + " " + genGoType(schema.Definitions[k], defs, imports) + "\n"
+		def := schema.Definitions[k]
+		t += "type " + goFieldName(k) + defAssign(def) + genGoType(def, defs, imports) + "\n"
 	}
 
 	switch schema.Form() {
@@ -141,6 +142,15 @@ func genGoType(schema jtd.Schema, defs map[string]jtd.Schema, imports map[string
 	}
 
 	return t
+}
+
+// defAssign picks the separator for a type definition. Timestamps become
+// aliases so they keep time.Time's JSON marshalling.
+func defAssign(def jtd.Schema) string {
+	if def.Form() == jtd.FormType && def.Type == jtd.TypeTimestamp {
+		return " = "
+	}
+	return " "
 }
 
 type resolvedMethod struct {
@@ -228,7 +238,7 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 			// "*Name" at each usage site instead (see resolveMethodTypes).
 			def.Nullable = false
 		}
-		fmt.Fprintf(&b, "type %s %s;\n", goFieldName(k), genGoType(def, meta.Definitions, imports))
+		fmt.Fprintf(&b, "type %s%s%s;\n", goFieldName(k), defAssign(def), genGoType(def, meta.Definitions, imports))
 	}
 
 	// Service interface
