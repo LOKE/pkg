@@ -12,11 +12,7 @@ import (
 )
 
 // optionalField renders an optional property's type and its JSON omit option.
-// Slices, maps and time.Time have no meaningful omitempty behaviour — empty
-// collections would be dropped and a zero time would always be sent — so they
-// use omitzero, which requires Go 1.24 in consumers. Integers become pointers
-// so absence can be distinguished from a zero value; nullable schemas are
-// already pointers via GenGoType.
+// omitzero needs Go 1.24 in consumers; ints are pointers to detect absence.
 func optionalField(schema jtd.Schema, imports map[string]struct{}) (goType, omit string) {
 	t := GenGoType(schema, imports)
 
