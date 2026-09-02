@@ -11,38 +11,32 @@ import (
 	jtd "github.com/jsontypedef/json-typedef-go"
 )
 
-// omitTag picks the JSON omit option for an optional property. Slices, maps and
-// time.Time have no meaningful omitempty behaviour — empty collections would be
-// dropped and a zero time would always be sent — so they use omitzero, which
-// requires Go 1.24 in consumers.
-func omitTag(schema jtd.Schema) string {
+// optionalField renders an optional property's type and its JSON omit option.
+// Slices, maps and time.Time have no meaningful omitempty behaviour — empty
+// collections would be dropped and a zero time would always be sent — so they
+// use omitzero, which requires Go 1.24 in consumers. Integers become pointers
+// so absence can be distinguished from a zero value; nullable schemas are
+// already pointers via GenGoType.
+func optionalField(schema jtd.Schema, imports map[string]struct{}) (goType, omit string) {
+	t := GenGoType(schema, imports)
+
 	if schema.Nullable {
-		return "omitempty"
+		return t, "omitempty"
 	}
+
 	switch schema.Form() {
 	case jtd.FormElements, jtd.FormValues:
-		return "omitzero"
+		return t, "omitzero"
 	case jtd.FormType:
-		if schema.Type == jtd.TypeTimestamp {
-			return "omitzero"
+		switch schema.Type {
+		case jtd.TypeTimestamp:
+			return t, "omitzero"
+		case jtd.TypeInt8, jtd.TypeUint8, jtd.TypeInt16, jtd.TypeUint16, jtd.TypeInt32, jtd.TypeUint32:
+			return "*" + t, "omitempty"
 		}
 	}
-	return "omitempty"
-}
 
-// isOptionalIntType reports whether an optional property's integer type should
-// be rendered as a pointer, so absence can be distinguished from a zero value.
-// Nullable schemas already render as pointers via GenGoType, so they're excluded
-// here to avoid a double pointer.
-func isOptionalIntType(schema jtd.Schema) bool {
-	if schema.Nullable || schema.Form() != jtd.FormType {
-		return false
-	}
-	switch schema.Type {
-	case jtd.TypeInt8, jtd.TypeUint8, jtd.TypeInt16, jtd.TypeUint16, jtd.TypeInt32, jtd.TypeUint32:
-		return true
-	}
-	return false
+	return t, "omitempty"
 }
 
 func GenGoType(schema jtd.Schema, imports map[string]struct{}) string {
@@ -92,12 +86,8 @@ func GenGoType(schema jtd.Schema, imports map[string]struct{}) string {
 			t += "\t" + goFieldName(k) + " " + GenGoType(schema.Properties[k], imports) + "`json:\"" + k + "\"`\n"
 		}
 		for _, k := range sortedKeys(schema.OptionalProperties) {
-			prop := schema.OptionalProperties[k]
-			propType := GenGoType(prop, imports)
-			if isOptionalIntType(prop) {
-				propType = "*" + propType
-			}
-			t += "\t" + goFieldName(k) + " " + propType + "`json:\"" + k + "," + omitTag(prop) + "\"`\n"
+			propType, omit := optionalField(schema.OptionalProperties[k], imports)
+			t += "\t" + goFieldName(k) + " " + propType + "`json:\"" + k + "," + omit + "\"`\n"
 		}
 		t += "}"
 	case jtd.FormDiscriminator:
