@@ -3,13 +3,16 @@ import { Context } from "@loke/context";
 
 export type Customer = {
   customerId: string;
+  loyaltyPoints: number;
   uid: string;
+  age?: number;
   coords?: {
   lat: number;
   lng: number;
 };
   guest?: boolean;
   name?: string;
+  nullableAge?: number | null;
   nullableTags?: string[] | null;
   scores?: Record<string, number>;
   seenAt?: string;

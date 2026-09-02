@@ -6,7 +6,8 @@
     "Customer": {
       "properties": {
         "customerId": { "type": "string" },
-        "uid": { "type": "string" }
+        "uid": { "type": "string" },
+        "loyaltyPoints": { "type": "int32" }
       },
       "optionalProperties": {
         "guest": { "type": "boolean" },
@@ -14,6 +15,8 @@
         "tags": { "elements": { "type": "string" } },
         "scores": { "values": { "type": "int32" } },
         "nullableTags": { "elements": { "type": "string" }, "nullable": true },
+        "age": { "type": "int32" },
+        "nullableAge": { "type": "int32", "nullable": true },
         "seenAt": { "type": "timestamp" },
         "coords": {
           "properties": {

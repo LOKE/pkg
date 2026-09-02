@@ -30,6 +30,21 @@ func omitTag(schema jtd.Schema) string {
 	return "omitempty"
 }
 
+// isOptionalIntType reports whether an optional property's integer type should
+// be rendered as a pointer, so absence can be distinguished from a zero value.
+// Nullable schemas already render as pointers via GenGoType, so they're excluded
+// here to avoid a double pointer.
+func isOptionalIntType(schema jtd.Schema) bool {
+	if schema.Nullable || schema.Form() != jtd.FormType {
+		return false
+	}
+	switch schema.Type {
+	case jtd.TypeInt8, jtd.TypeUint8, jtd.TypeInt16, jtd.TypeUint16, jtd.TypeInt32, jtd.TypeUint32:
+		return true
+	}
+	return false
+}
+
 func GenGoType(schema jtd.Schema, imports map[string]struct{}) string {
 	var t string
 
@@ -78,7 +93,11 @@ func GenGoType(schema jtd.Schema, imports map[string]struct{}) string {
 		}
 		for _, k := range sortedKeys(schema.OptionalProperties) {
 			prop := schema.OptionalProperties[k]
-			t += "\t" + goFieldName(k) + " " + GenGoType(prop, imports) + "`json:\"" + k + "," + omitTag(prop) + "\"`\n"
+			propType := GenGoType(prop, imports)
+			if isOptionalIntType(prop) {
+				propType = "*" + propType
+			}
+			t += "\t" + goFieldName(k) + " " + propType + "`json:\"" + k + "," + omitTag(prop) + "\"`\n"
 		}
 		t += "}"
 	case jtd.FormDiscriminator:
