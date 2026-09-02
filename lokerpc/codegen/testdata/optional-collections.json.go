@@ -8,11 +8,12 @@ import (
 )
 
 type Customer struct {
-	CustomerID    string `json:"customerId"`
-	LoyaltyPoints int32  `json:"loyaltyPoints"`
-	Uid           string `json:"uid"`
-	Age           *int32 `json:"age,omitempty"`
-	Coords        struct {
+	CustomerID     string `json:"customerId"`
+	LoyaltyPoints  int32  `json:"loyaltyPoints"`
+	NullablePoints *int32 `json:"nullablePoints"`
+	Uid            string `json:"uid"`
+	Age            *int32 `json:"age,omitempty"`
+	Coords         struct {
 		Lat float32 `json:"lat"`
 		Lng float32 `json:"lng"`
 	} `json:"coords,omitempty"`

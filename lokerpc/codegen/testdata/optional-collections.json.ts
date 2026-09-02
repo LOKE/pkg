@@ -4,6 +4,7 @@ import { Context } from "@loke/context";
 export type Customer = {
   customerId: string;
   loyaltyPoints: number;
+  nullablePoints: number | null;
   uid: string;
   age?: number;
   coords?: {
