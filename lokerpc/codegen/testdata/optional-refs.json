@@ -1,0 +1,36 @@
+{
+  "serviceName": "optional-refs",
+  "help": "",
+  "multiArg": false,
+  "definitions": {
+    "Count": { "type": "int32" },
+    "Ratio": { "type": "float64" },
+    "CreatedAt": { "type": "timestamp" },
+    "CreatedAtAlias": { "ref": "CreatedAt" },
+    "Tags": { "elements": { "type": "string" } },
+    "MaybeCount": { "type": "int32", "nullable": true },
+    "CountAlias": { "ref": "Count" },
+    "Filter": {
+      "optionalProperties": {
+        "count": { "ref": "Count" },
+        "countAlias": { "ref": "CountAlias" },
+        "maybeCount": { "ref": "MaybeCount" },
+        "ratio": { "ref": "Ratio" },
+        "createdAt": { "ref": "CreatedAt" },
+        "createdAtAlias": { "ref": "CreatedAtAlias" },
+        "tags": { "ref": "Tags" },
+        "inlineCount": { "type": "int32" }
+      }
+    }
+  },
+  "interfaces": [
+    {
+      "help": "search method",
+      "methodName": "search",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": { "ref": "Filter" },
+      "responseTypeDef": { "elements": { "ref": "Count" } }
+    }
+  ]
+}

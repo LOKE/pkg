@@ -11,31 +11,77 @@ import (
 	jtd "github.com/jsontypedef/json-typedef-go"
 )
 
-// omitTag picks the JSON omit option for an optional property. Slices, maps and
-// time.Time have no meaningful omitempty behaviour — empty collections would be
-// dropped and a zero time would always be sent — so they use omitzero, which
-// requires Go 1.24 in consumers.
-func omitTag(schema jtd.Schema) string {
-	if schema.Nullable {
-		return "omitempty"
+// resolveRef follows schema through ref definitions to the schema it denotes.
+func resolveRef(schema jtd.Schema, defs map[string]jtd.Schema) jtd.Schema {
+	seen := map[string]bool{}
+	for schema.Ref != nil {
+		if seen[*schema.Ref] {
+			return schema
+		}
+		seen[*schema.Ref] = true
+		def, ok := defs[*schema.Ref]
+		if !ok {
+			return schema
+		}
+		schema = def
 	}
-	switch schema.Form() {
+	return schema
+}
+
+// optionalField renders an optional property's type and its JSON omit option.
+// omitzero needs Go 1.24 in consumers; ints are pointers to detect absence.
+func optionalField(schema jtd.Schema, defs map[string]jtd.Schema, imports map[string]struct{}) (goType, omit string) {
+	t := genGoType(schema, defs, imports)
+
+	if schema.Nullable {
+		return t, "omitempty"
+	}
+
+	// A ref renders as a named type, so the underlying definition decides how
+	// absence is expressed.
+	resolved := resolveRef(schema, defs)
+	if resolved.Nullable {
+		return t, "omitempty"
+	}
+
+	switch resolved.Form() {
 	case jtd.FormElements, jtd.FormValues:
-		return "omitzero"
+		return t, "omitzero"
 	case jtd.FormType:
-		if schema.Type == jtd.TypeTimestamp {
-			return "omitzero"
+		switch resolved.Type {
+		case jtd.TypeTimestamp:
+			return t, "omitzero"
+		case jtd.TypeInt8, jtd.TypeUint8, jtd.TypeInt16, jtd.TypeUint16, jtd.TypeInt32, jtd.TypeUint32:
+			return "*" + t, "omitempty"
 		}
 	}
-	return "omitempty"
+
+	return t, "omitempty"
 }
 
 func GenGoType(schema jtd.Schema, imports map[string]struct{}) string {
+	return genGoType(schema, schema.Definitions, imports)
+}
+
+// genGoType renders schema, using defs to resolve refs to definitions.
+func genGoType(schema jtd.Schema, defs map[string]jtd.Schema, imports map[string]struct{}) string {
 	var t string
+
+	if len(schema.Definitions) > 0 {
+		merged := make(map[string]jtd.Schema, len(defs)+len(schema.Definitions))
+		for k, v := range defs {
+			merged[k] = v
+		}
+		for k, v := range schema.Definitions {
+			merged[k] = v
+		}
+		defs = merged
+	}
 
 	for _, k := range sortedKeys(schema.Definitions) {
 		t += "\n"
-		t += "type " + goFieldName(k) + " " + GenGoType(schema.Definitions[k], imports) + "\n"
+		def := schema.Definitions[k]
+		t += "type " + goFieldName(k) + defAssign(def, defs) + genGoType(def, defs, imports) + "\n"
 	}
 
 	switch schema.Form() {
@@ -68,17 +114,17 @@ func GenGoType(schema jtd.Schema, imports map[string]struct{}) string {
 			t += "bool"
 		}
 	case jtd.FormElements:
-		t += "[]" + GenGoType(*schema.Elements, imports)
+		t += "[]" + genGoType(*schema.Elements, defs, imports)
 	case jtd.FormValues:
-		t += "map[string]" + GenGoType(*schema.Values, imports)
+		t += "map[string]" + genGoType(*schema.Values, defs, imports)
 	case jtd.FormProperties:
 		t += "struct {\n"
 		for _, k := range sortedKeys(schema.Properties) {
-			t += "\t" + goFieldName(k) + " " + GenGoType(schema.Properties[k], imports) + "`json:\"" + k + "\"`\n"
+			t += "\t" + goFieldName(k) + " " + genGoType(schema.Properties[k], defs, imports) + "`json:\"" + k + "\"`\n"
 		}
 		for _, k := range sortedKeys(schema.OptionalProperties) {
-			prop := schema.OptionalProperties[k]
-			t += "\t" + goFieldName(k) + " " + GenGoType(prop, imports) + "`json:\"" + k + "," + omitTag(prop) + "\"`\n"
+			propType, omit := optionalField(schema.OptionalProperties[k], defs, imports)
+			t += "\t" + goFieldName(k) + " " + propType + "`json:\"" + k + "," + omit + "\"`\n"
 		}
 		t += "}"
 	case jtd.FormDiscriminator:
@@ -96,6 +142,21 @@ func GenGoType(schema jtd.Schema, imports map[string]struct{}) string {
 	}
 
 	return t
+}
+
+// defAssign picks the separator for a type definition. Timestamps, including
+// those reached through a chain of refs, become aliases so they keep
+// time.Time's JSON marshalling.
+func defAssign(def jtd.Schema, defs map[string]jtd.Schema) string {
+	seen := map[string]bool{}
+	for def.Form() == jtd.FormRef && !seen[*def.Ref] {
+		seen[*def.Ref] = true
+		def = defs[*def.Ref]
+	}
+	if def.Form() == jtd.FormType && def.Type == jtd.TypeTimestamp {
+		return " = "
+	}
+	return " "
 }
 
 type resolvedMethod struct {
@@ -123,7 +184,7 @@ func refAlreadyPointer(schema jtd.Schema, resolvedType string, defs map[string]j
 		return true
 	}
 	if schema.Ref != nil && !hoisted[*schema.Ref] {
-		return strings.HasPrefix(GenGoType(defs[*schema.Ref], imports), "*")
+		return strings.HasPrefix(genGoType(defs[*schema.Ref], defs, imports), "*")
 	}
 	return false
 }
@@ -133,7 +194,7 @@ func refAlreadyPointer(schema jtd.Schema, resolvedType string, defs map[string]j
 func resolveMethodTypes(v lokerpc.EndpointMeta, defs map[string]jtd.Schema, hoisted map[string]bool, imports map[string]struct{}) resolvedMethod {
 	reqType := "any"
 	if v.RequestTypeDef != nil {
-		reqType = GenGoType(*v.RequestTypeDef, imports)
+		reqType = genGoType(*v.RequestTypeDef, defs, imports)
 
 		// Unlike responses, requests aren't wrapped in "*" by default — only
 		// when the schema is actually nullable.
@@ -150,7 +211,7 @@ func resolveMethodTypes(v lokerpc.EndpointMeta, defs map[string]jtd.Schema, hois
 			isVoid = true
 			resType = ""
 		} else {
-			resType = GenGoType(*v.ResponseTypeDef, imports)
+			resType = genGoType(*v.ResponseTypeDef, defs, imports)
 			isNullable = schemaIsNullable(*v.ResponseTypeDef, defs)
 
 			// A ref to a pre-existing nullable definition already renders as a
@@ -183,7 +244,7 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 			// "*Name" at each usage site instead (see resolveMethodTypes).
 			def.Nullable = false
 		}
-		fmt.Fprintf(&b, "type %s %s;\n", goFieldName(k), GenGoType(def, imports))
+		fmt.Fprintf(&b, "type %s%s%s;\n", goFieldName(k), defAssign(def, meta.Definitions), genGoType(def, meta.Definitions, imports))
 	}
 
 	// Service interface
