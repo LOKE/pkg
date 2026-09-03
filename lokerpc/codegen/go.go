@@ -81,7 +81,7 @@ func genGoType(schema jtd.Schema, defs map[string]jtd.Schema, imports map[string
 	for _, k := range sortedKeys(schema.Definitions) {
 		t += "\n"
 		def := schema.Definitions[k]
-		t += "type " + goFieldName(k) + defAssign(def) + genGoType(def, defs, imports) + "\n"
+		t += "type " + goFieldName(k) + defAssign(def, defs) + genGoType(def, defs, imports) + "\n"
 	}
 
 	switch schema.Form() {
@@ -144,9 +144,15 @@ func genGoType(schema jtd.Schema, defs map[string]jtd.Schema, imports map[string
 	return t
 }
 
-// defAssign picks the separator for a type definition. Timestamps become
-// aliases so they keep time.Time's JSON marshalling.
-func defAssign(def jtd.Schema) string {
+// defAssign picks the separator for a type definition. Timestamps, including
+// those reached through a chain of refs, become aliases so they keep
+// time.Time's JSON marshalling.
+func defAssign(def jtd.Schema, defs map[string]jtd.Schema) string {
+	seen := map[string]bool{}
+	for def.Form() == jtd.FormRef && !seen[*def.Ref] {
+		seen[*def.Ref] = true
+		def = defs[*def.Ref]
+	}
 	if def.Form() == jtd.FormType && def.Type == jtd.TypeTimestamp {
 		return " = "
 	}
@@ -238,7 +244,7 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 			// "*Name" at each usage site instead (see resolveMethodTypes).
 			def.Nullable = false
 		}
-		fmt.Fprintf(&b, "type %s%s%s;\n", goFieldName(k), defAssign(def), genGoType(def, meta.Definitions, imports))
+		fmt.Fprintf(&b, "type %s%s%s;\n", goFieldName(k), defAssign(def, meta.Definitions), genGoType(def, meta.Definitions, imports))
 	}
 
 	// Service interface

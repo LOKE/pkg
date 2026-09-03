@@ -7,10 +7,13 @@ export type CountAlias = Count;
 
 export type CreatedAt = string;
 
+export type CreatedAtAlias = CreatedAt;
+
 export type Filter = {
   count?: Count;
   countAlias?: CountAlias;
   createdAt?: CreatedAt;
+  createdAtAlias?: CreatedAtAlias;
   inlineCount?: number;
   maybeCount?: MaybeCount;
   ratio?: Ratio;

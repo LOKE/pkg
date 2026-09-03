@@ -13,14 +13,17 @@ type CountAlias Count
 
 type CreatedAt = time.Time
 
+type CreatedAtAlias = CreatedAt
+
 type Filter struct {
-	Count       *Count      `json:"count,omitempty"`
-	CountAlias  *CountAlias `json:"countAlias,omitempty"`
-	CreatedAt   CreatedAt   `json:"createdAt,omitzero"`
-	InlineCount *int32      `json:"inlineCount,omitempty"`
-	MaybeCount  MaybeCount  `json:"maybeCount,omitempty"`
-	Ratio       Ratio       `json:"ratio,omitempty"`
-	Tags        Tags        `json:"tags,omitzero"`
+	Count          *Count         `json:"count,omitempty"`
+	CountAlias     *CountAlias    `json:"countAlias,omitempty"`
+	CreatedAt      CreatedAt      `json:"createdAt,omitzero"`
+	CreatedAtAlias CreatedAtAlias `json:"createdAtAlias,omitzero"`
+	InlineCount    *int32         `json:"inlineCount,omitempty"`
+	MaybeCount     MaybeCount     `json:"maybeCount,omitempty"`
+	Ratio          Ratio          `json:"ratio,omitempty"`
+	Tags           Tags           `json:"tags,omitzero"`
 }
 
 type MaybeCount *int32
