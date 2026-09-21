@@ -21,11 +21,6 @@ func TestGenGoClient(t *testing.T) {
 		t.Run(p, func(t *testing.T) {
 			var meta lokerpc.Meta
 
-			// TODO: go gen doesn't yet support discriminators
-			if t.Name() == "TestGenGoClient/testdata/discriminator.json" {
-				return
-			}
-
 			// 😠 don't like that "union" meta tag got let in as a supported
 			// feature. It's really not portable, and there is no way for
 			// statically typed languages to support it
