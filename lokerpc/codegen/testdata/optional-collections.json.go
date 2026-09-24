@@ -13,7 +13,7 @@ type Customer struct {
 	NullablePoints *int32 `json:"nullablePoints"`
 	Uid            string `json:"uid"`
 	Age            *int32 `json:"age,omitempty"`
-	Coords         struct {
+	Coords         *struct {
 		Lat float32 `json:"lat"`
 		Lng float32 `json:"lng"`
 	} `json:"coords,omitempty"`
