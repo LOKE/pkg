@@ -38,7 +38,8 @@ type goGen struct {
 }
 
 // optionalField renders an optional property's type and its JSON omit option.
-// omitzero needs Go 1.24 in consumers; ints are pointers to detect absence.
+// Scalars and objects are pointers so absence is distinguishable from a zero
+// value; collections rely on a nil slice/map and use omitzero.
 func optionalField(schema jtd.Schema, name string, g goGen) (goType, omit string) {
 	t := genGoType(schema, name, false, g)
 
@@ -64,13 +65,13 @@ func optionalField(schema jtd.Schema, name string, g goGen) (goType, omit string
 		// need it regardless: an envelope with no variant set refuses to
 		// marshal, and omitempty never omits a struct.
 		return "*" + t, "omitempty"
-	case jtd.FormType:
-		switch resolved.Type {
-		case jtd.TypeTimestamp:
-			return t, "omitzero"
-		case jtd.TypeInt8, jtd.TypeUint8, jtd.TypeInt16, jtd.TypeUint16, jtd.TypeInt32, jtd.TypeUint32:
-			return "*" + t, "omitempty"
-		}
+	case jtd.FormType, jtd.FormEnum:
+		// Every scalar has a zero value a payload can legitimately carry, so a
+		// value type cannot answer "was this field sent?". Enums are strings,
+		// so absence reads as "". Timestamps are the worst of them: omitzero
+		// only affects marshalling, so an absent timestamp still decodes to
+		// time.Time{} and reads as a real instant somewhere in year 1.
+		return "*" + t, "omitempty"
 	}
 
 	return t, "omitempty"
