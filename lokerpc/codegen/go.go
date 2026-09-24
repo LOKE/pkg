@@ -47,6 +47,12 @@ func optionalField(schema jtd.Schema, defs map[string]jtd.Schema, imports map[st
 	switch resolved.Form() {
 	case jtd.FormElements, jtd.FormValues:
 		return t, "omitzero"
+	case jtd.FormProperties, jtd.FormDiscriminator:
+		// Structs render as a value type, so an absent object and one whose
+		// fields all happen to be zero decode identically. Consumers end up
+		// guessing from a field ("id != \"\""), which is wrong whenever the
+		// zero value is legitimate. A pointer makes absence unambiguous.
+		return "*" + t, "omitempty"
 	case jtd.FormType:
 		switch resolved.Type {
 		case jtd.TypeTimestamp:
