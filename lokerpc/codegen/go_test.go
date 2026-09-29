@@ -3,7 +3,12 @@ package codegen
 import (
 	"bytes"
 	"encoding/json"
+	"go/ast"
 	"go/format"
+	"go/importer"
+	"go/parser"
+	"go/token"
+	"go/types"
 	"os"
 	"path/filepath"
 	"testing"
@@ -17,14 +22,12 @@ func TestGenGoClient(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	fset := token.NewFileSet()
+	imp := importer.ForCompiler(fset, "source", nil)
+
 	for _, p := range paths {
 		t.Run(p, func(t *testing.T) {
 			var meta lokerpc.Meta
-
-			// TODO: go gen doesn't yet support discriminators
-			if t.Name() == "TestGenGoClient/testdata/discriminator.json" {
-				return
-			}
 
 			// 😠 don't like that "union" meta tag got let in as a supported
 			// feature. It's really not portable, and there is no way for
@@ -53,6 +56,15 @@ func TestGenGoClient(t *testing.T) {
 				// Some fixtures (e.g., spaces-hyphens.json) produce fields that are
 				// not valid Go identifiers. This is a known codegen limitation.
 				t.Skipf("generated code is not valid Go: %v", err)
+			}
+
+			file, err := parser.ParseFile(fset, p+".go", formatted, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			conf := types.Config{Importer: imp}
+			if _, err := conf.Check("", fset, []*ast.File{file}, nil); err != nil {
+				t.Errorf("generated code does not type-check: %v", err)
 			}
 
 			goldenPath := p + ".go"

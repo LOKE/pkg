@@ -28,10 +28,19 @@ func resolveRef(schema jtd.Schema, defs map[string]jtd.Schema) jtd.Schema {
 	return schema
 }
 
+// goGen carries the definitions in scope, the imports the output needs, and
+// the declarations hoisted out of inline positions (union envelopes and their
+// variants), which need a name to hang methods off.
+type goGen struct {
+	defs    map[string]jtd.Schema
+	imports map[string]struct{}
+	decls   *bytes.Buffer
+}
+
 // optionalField renders an optional property's type and its JSON omit option.
 // omitzero needs Go 1.24 in consumers; ints are pointers to detect absence.
-func optionalField(schema jtd.Schema, defs map[string]jtd.Schema, imports map[string]struct{}) (goType, omit string) {
-	t := genGoType(schema, defs, imports)
+func optionalField(schema jtd.Schema, name string, g goGen) (goType, omit string) {
+	t := genGoType(schema, name, false, g)
 
 	if schema.Nullable {
 		return t, "omitempty"
@@ -39,7 +48,7 @@ func optionalField(schema jtd.Schema, defs map[string]jtd.Schema, imports map[st
 
 	// A ref renders as a named type, so the underlying definition decides how
 	// absence is expressed.
-	resolved := resolveRef(schema, defs)
+	resolved := resolveRef(schema, g.defs)
 	if resolved.Nullable {
 		return t, "omitempty"
 	}
@@ -47,6 +56,10 @@ func optionalField(schema jtd.Schema, defs map[string]jtd.Schema, imports map[st
 	switch resolved.Form() {
 	case jtd.FormElements, jtd.FormValues:
 		return t, "omitzero"
+	case jtd.FormDiscriminator:
+		// An envelope with no variant set refuses to marshal, and omitempty
+		// never omits a struct.
+		return "*" + t, "omitempty"
 	case jtd.FormType:
 		switch resolved.Type {
 		case jtd.TypeTimestamp:
@@ -60,28 +73,31 @@ func optionalField(schema jtd.Schema, defs map[string]jtd.Schema, imports map[st
 }
 
 func GenGoType(schema jtd.Schema, imports map[string]struct{}) string {
-	return genGoType(schema, schema.Definitions, imports)
+	var decls bytes.Buffer
+	t := genGoType(schema, "", true, goGen{defs: schema.Definitions, imports: imports, decls: &decls})
+	return decls.String() + t
 }
 
-// genGoType renders schema, using defs to resolve refs to definitions.
-func genGoType(schema jtd.Schema, defs map[string]jtd.Schema, imports map[string]struct{}) string {
+// genGoType renders schema. name is the PascalCase path used to name hoisted
+// types; root is true when the caller is declaring name itself.
+func genGoType(schema jtd.Schema, name string, root bool, g goGen) string {
 	var t string
 
 	if len(schema.Definitions) > 0 {
-		merged := make(map[string]jtd.Schema, len(defs)+len(schema.Definitions))
-		for k, v := range defs {
+		merged := make(map[string]jtd.Schema, len(g.defs)+len(schema.Definitions))
+		for k, v := range g.defs {
 			merged[k] = v
 		}
 		for k, v := range schema.Definitions {
 			merged[k] = v
 		}
-		defs = merged
+		g.defs = merged
 	}
 
 	for _, k := range sortedKeys(schema.Definitions) {
 		t += "\n"
 		def := schema.Definitions[k]
-		t += "type " + goFieldName(k) + defAssign(def, defs) + genGoType(def, defs, imports) + "\n"
+		t += "type " + goFieldName(k) + defAssign(def, g.defs) + genGoType(def, goFieldName(k), true, g) + "\n"
 	}
 
 	switch schema.Form() {
@@ -93,7 +109,7 @@ func genGoType(schema jtd.Schema, defs map[string]jtd.Schema, imports map[string
 			t += "string"
 		case jtd.TypeTimestamp:
 			t += "time.Time"
-			imports["time"] = struct{}{}
+			g.imports["time"] = struct{}{}
 		case jtd.TypeInt8:
 			t += "int8"
 		case jtd.TypeInt16:
@@ -114,21 +130,32 @@ func genGoType(schema jtd.Schema, defs map[string]jtd.Schema, imports map[string
 			t += "bool"
 		}
 	case jtd.FormElements:
-		t += "[]" + genGoType(*schema.Elements, defs, imports)
+		t += "[]" + genGoType(*schema.Elements, name+"Item", false, g)
 	case jtd.FormValues:
-		t += "map[string]" + genGoType(*schema.Values, defs, imports)
+		t += "map[string]" + genGoType(*schema.Values, name+"Value", false, g)
 	case jtd.FormProperties:
 		t += "struct {\n"
 		for _, k := range sortedKeys(schema.Properties) {
-			t += "\t" + goFieldName(k) + " " + genGoType(schema.Properties[k], defs, imports) + "`json:\"" + k + "\"`\n"
+			t += "\t" + goFieldName(k) + " " + genGoType(schema.Properties[k], name+goFieldName(k), false, g) + "`json:\"" + k + "\"`\n"
 		}
 		for _, k := range sortedKeys(schema.OptionalProperties) {
-			propType, omit := optionalField(schema.OptionalProperties[k], defs, imports)
+			propType, omit := optionalField(schema.OptionalProperties[k], name+goFieldName(k), g)
 			t += "\t" + goFieldName(k) + " " + propType + "`json:\"" + k + "," + omit + "\"`\n"
 		}
 		t += "}"
 	case jtd.FormDiscriminator:
-		panic("discriminator not supported")
+		if root && !schema.Nullable {
+			t += union(schema, name, g)
+		} else {
+			// Methods can't hang off a pointer type, so a nullable definition
+			// points at a separately named envelope.
+			envelope := name
+			if root {
+				envelope += "Union"
+			}
+			fmt.Fprintf(g.decls, "\ntype %s %s\n", envelope, union(schema, envelope, g))
+			t += envelope
+		}
 	case jtd.FormEnum:
 		// Could do more here, but this is good enough for now
 		t += "string"
@@ -146,8 +173,10 @@ func genGoType(schema jtd.Schema, defs map[string]jtd.Schema, imports map[string
 
 // defAssign picks the separator for a type definition. Timestamps, including
 // those reached through a chain of refs, become aliases so they keep
-// time.Time's JSON marshalling.
+// time.Time's JSON marshalling. Refs to a union alias it for the same reason:
+// a defined type would drop the envelope's MarshalJSON/UnmarshalJSON.
 func defAssign(def jtd.Schema, defs map[string]jtd.Schema) string {
+	isRef := def.Form() == jtd.FormRef
 	seen := map[string]bool{}
 	for def.Form() == jtd.FormRef && !seen[*def.Ref] {
 		seen[*def.Ref] = true
@@ -156,7 +185,78 @@ func defAssign(def jtd.Schema, defs map[string]jtd.Schema) string {
 	if def.Form() == jtd.FormType && def.Type == jtd.TypeTimestamp {
 		return " = "
 	}
+	if isRef && def.Form() == jtd.FormDiscriminator {
+		return " = "
+	}
 	return " "
+}
+
+// union emits a oneof-style envelope: one pointer field per variant, with
+// MarshalJSON/UnmarshalJSON translating to and from the tagged wire form. An
+// unknown tag decodes to an empty envelope so a server adding a variant
+// doesn't break deployed clients.
+func union(schema jtd.Schema, name string, g goGen) string {
+	g.imports["encoding/json"] = struct{}{}
+	g.imports["fmt"] = struct{}{}
+
+	keys := sortedKeys(schema.Mapping)
+	variants := make([]string, len(keys))
+	for i, k := range keys {
+		variants[i] = name + variantName(k)
+		fmt.Fprintf(g.decls, "\ntype %s %s\n", variants[i], genGoType(schema.Mapping[k], variants[i], true, g))
+	}
+
+	body := "struct {\n"
+	for i := range keys {
+		body += "\t" + variantName(keys[i]) + " *" + variants[i] + "\n"
+	}
+	body += "}"
+
+	tagField := goFieldName(schema.Discriminator)
+	m := g.decls
+	fmt.Fprintf(m, "\nfunc (v %s) MarshalJSON() ([]byte, error) {\n", name)
+	m.WriteString("\tset := 0\n")
+	for _, k := range keys {
+		fmt.Fprintf(m, "\tif v.%s != nil {\n\t\tset++\n\t}\n", variantName(k))
+	}
+	m.WriteString("\tif set > 1 {\n")
+	fmt.Fprintf(m, "\t\treturn nil, fmt.Errorf(\"%s: %%d variants set, want one\", set)\n", name)
+	m.WriteString("\t}\n")
+	m.WriteString("\tswitch {\n")
+	for i, k := range keys {
+		fmt.Fprintf(m, "\tcase v.%s != nil:\n", variantName(k))
+		fmt.Fprintf(m, "\t\treturn json.Marshal(struct {\n\t\t\t%s string `json:\"%s\"`\n\t\t\t*%s\n\t\t}{%q, v.%s})\n", tagField, schema.Discriminator, variants[i], k, variantName(k))
+	}
+	m.WriteString("\t}\n")
+	fmt.Fprintf(m, "\treturn nil, fmt.Errorf(\"%s: no variant set\")\n", name)
+	m.WriteString("}\n")
+
+	fmt.Fprintf(m, "\nfunc (v *%s) UnmarshalJSON(b []byte) error {\n", name)
+	fmt.Fprintf(m, "\tvar tag struct {\n\t\t%s string `json:\"%s\"`\n\t}\n", tagField, schema.Discriminator)
+	m.WriteString("\tif err := json.Unmarshal(b, &tag); err != nil {\n\t\treturn err\n\t}\n")
+	fmt.Fprintf(m, "\tif tag.%s == \"\" {\n", tagField)
+	fmt.Fprintf(m, "\t\treturn fmt.Errorf(\"%s: missing %s\")\n", name, schema.Discriminator)
+	m.WriteString("\t}\n")
+	fmt.Fprintf(m, "\t*v = %s{}\n", name)
+	fmt.Fprintf(m, "\tswitch tag.%s {\n", tagField)
+	for i, k := range keys {
+		fmt.Fprintf(m, "\tcase %q:\n", k)
+		fmt.Fprintf(m, "\t\tv.%s = &%s{}\n", variantName(k), variants[i])
+		fmt.Fprintf(m, "\t\treturn json.Unmarshal(b, v.%s)\n", variantName(k))
+	}
+	m.WriteString("\t}\n")
+	m.WriteString("\treturn nil\n")
+	m.WriteString("}\n")
+
+	return body
+}
+
+// SCREAMING_CASE tags would otherwise collapse to USERCREATED.
+func variantName(tag string) string {
+	if tag == strings.ToUpper(tag) {
+		tag = strings.ToLower(tag)
+	}
+	return goFieldName(tag)
 }
 
 type resolvedMethod struct {
@@ -179,26 +279,26 @@ func schemaIsNullable(schema jtd.Schema, defs map[string]jtd.Schema) bool {
 
 // refAlreadyPointer reports whether resolvedType already denotes a pointer,
 // either directly or via a ref to a pre-existing (non-hoisted) definition
-func refAlreadyPointer(schema jtd.Schema, resolvedType string, defs map[string]jtd.Schema, hoisted map[string]bool, imports map[string]struct{}) bool {
+func refAlreadyPointer(schema jtd.Schema, resolvedType string, hoisted map[string]bool, g goGen) bool {
 	if strings.HasPrefix(resolvedType, "*") {
 		return true
 	}
 	if schema.Ref != nil && !hoisted[*schema.Ref] {
-		return strings.HasPrefix(genGoType(defs[*schema.Ref], defs, imports), "*")
+		return g.defs[*schema.Ref].Nullable
 	}
 	return false
 }
 
 // resolveMethodTypes determines the Go request and response types for an endpoint,
 // including whether the method has a void return type.
-func resolveMethodTypes(v lokerpc.EndpointMeta, defs map[string]jtd.Schema, hoisted map[string]bool, imports map[string]struct{}) resolvedMethod {
+func resolveMethodTypes(v lokerpc.EndpointMeta, hoisted map[string]bool, g goGen) resolvedMethod {
 	reqType := "any"
 	if v.RequestTypeDef != nil {
-		reqType = genGoType(*v.RequestTypeDef, defs, imports)
+		reqType = genGoType(*v.RequestTypeDef, goFieldName(v.MethodName)+"Request", false, g)
 
 		// Unlike responses, requests aren't wrapped in "*" by default — only
 		// when the schema is actually nullable.
-		if schemaIsNullable(*v.RequestTypeDef, defs) && !refAlreadyPointer(*v.RequestTypeDef, reqType, defs, hoisted, imports) {
+		if schemaIsNullable(*v.RequestTypeDef, g.defs) && !refAlreadyPointer(*v.RequestTypeDef, reqType, hoisted, g) {
 			reqType = "*" + reqType
 		}
 	}
@@ -211,12 +311,12 @@ func resolveMethodTypes(v lokerpc.EndpointMeta, defs map[string]jtd.Schema, hois
 			isVoid = true
 			resType = ""
 		} else {
-			resType = genGoType(*v.ResponseTypeDef, defs, imports)
-			isNullable = schemaIsNullable(*v.ResponseTypeDef, defs)
+			resType = genGoType(*v.ResponseTypeDef, goFieldName(v.MethodName)+"Response", false, g)
+			isNullable = schemaIsNullable(*v.ResponseTypeDef, g.defs)
 
 			// A ref to a pre-existing nullable definition already renders as a
 			// pointer type, so don't stack another "*" on top.
-			alreadyPointer := refAlreadyPointer(*v.ResponseTypeDef, resType, defs, hoisted, imports)
+			alreadyPointer := refAlreadyPointer(*v.ResponseTypeDef, resType, hoisted, g)
 
 			if !alreadyPointer && !strings.HasPrefix(resType, "[]") && !strings.HasPrefix(resType, "map[") {
 				resType = "*" + resType
@@ -230,11 +330,8 @@ func resolveMethodTypes(v lokerpc.EndpointMeta, defs map[string]jtd.Schema, hois
 func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 	defOrder, hoisted := normalise(&meta)
 
-	imports := map[string]struct{}{
-		"context": {},
-	}
-
-	var b bytes.Buffer
+	var b, decls bytes.Buffer
+	g := goGen{defs: meta.Definitions, imports: map[string]struct{}{"context": {}}, decls: &decls}
 
 	for _, k := range defOrder {
 		b.WriteString("\n")
@@ -244,15 +341,17 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 			// "*Name" at each usage site instead (see resolveMethodTypes).
 			def.Nullable = false
 		}
-		fmt.Fprintf(&b, "type %s%s%s;\n", goFieldName(k), defAssign(def, meta.Definitions), genGoType(def, meta.Definitions, imports))
+		fmt.Fprintf(&b, "type %s%s%s;\n", goFieldName(k), defAssign(def, meta.Definitions), genGoType(def, goFieldName(k), true, g))
 	}
+
+	b.Write(decls.Bytes())
 
 	// Service interface
 	b.WriteString("\n")
 	// goDocComment(b, meta.Help, "")
 	b.WriteString("type " + goFieldName(meta.ServiceName) + "Service interface {\n")
 	for _, v := range meta.Interfaces {
-		m := resolveMethodTypes(v, meta.Definitions, hoisted, imports)
+		m := resolveMethodTypes(v, hoisted, g)
 
 		// goDocComment(b, v.Help, "\t")
 		if m.isVoid {
@@ -268,7 +367,7 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 	// goDocComment(b, meta.Help, "")
 	b.WriteString("type " + goFieldName(meta.ServiceName) + "RPCClient struct{\nlokerpc.Client}\n\n")
 	for _, v := range meta.Interfaces {
-		m := resolveMethodTypes(v, meta.Definitions, hoisted, imports)
+		m := resolveMethodTypes(v, hoisted, g)
 
 		if m.isVoid {
 			fmt.Fprintf(&b, "func (c %sRPCClient) %s(ctx context.Context, req %s) error {\n", goFieldName(meta.ServiceName), goFieldName(v.MethodName), m.reqType)
@@ -301,7 +400,7 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 	fmt.Fprintf(w, "package %s\n", strings.ToLower(strings.ReplaceAll(meta.ServiceName, "-", "")))
 	fmt.Fprintf(w, "\nimport (\n")
 
-	for _, im := range sortedKeys(imports) {
+	for _, im := range sortedKeys(g.imports) {
 		fmt.Fprintf(w, "\t\"%s\"\n", im)
 	}
 	fmt.Fprintf(w, "\n\t\"github.com/LOKE/pkg/lokerpc\"\n")
