@@ -110,7 +110,7 @@ func (c Client) DoRequest(ctx context.Context, method string, args, result any) 
 		// Could probably also use .Format(time.RFC3339Nano), but MarshalJSON
 		// seems to do more, and I think it'll be safer for JS
 		b, err := deadline.MarshalJSON()
-		if err != nil {
+		if err == nil {
 			// string(b[1:len(b)-1]) strips the quotes from the value
 			req.Header.Set("X-Request-Deadline", string(b[1:len(b)-1]))
 		}

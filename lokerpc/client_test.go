@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/LOKE/pkg/errors"
 )
@@ -129,5 +130,29 @@ func TestClient_DoRequest(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestClient_DoRequestSendsDeadline(t *testing.T) {
+	var gotDeadline string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotDeadline = r.Header.Get("X-Request-Deadline")
+	}))
+	defer server.Close()
+
+	deadline := time.Now().Add(time.Minute)
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+
+	if err := NewClient(server.URL).DoRequest(ctx, "method", nil, nil); err != nil {
+		t.Fatalf("DoRequest() error = %v", err)
+	}
+
+	got, err := time.Parse(time.RFC3339Nano, gotDeadline)
+	if err != nil {
+		t.Fatalf("X-Request-Deadline = %q, not RFC3339: %v", gotDeadline, err)
+	}
+	if !got.Equal(deadline) {
+		t.Errorf("X-Request-Deadline = %v, want %v", got, deadline)
 	}
 }
