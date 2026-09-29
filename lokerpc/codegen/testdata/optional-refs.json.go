@@ -7,6 +7,11 @@ import (
 	"github.com/LOKE/pkg/lokerpc"
 )
 
+type Coords struct {
+	Lat float64 `json:"lat"`
+	Lng float64 `json:"lng"`
+}
+
 type Count int32
 
 type CountAlias Count
@@ -16,14 +21,15 @@ type CreatedAt = time.Time
 type CreatedAtAlias = CreatedAt
 
 type Filter struct {
-	Count          *Count         `json:"count,omitempty"`
-	CountAlias     *CountAlias    `json:"countAlias,omitempty"`
-	CreatedAt      CreatedAt      `json:"createdAt,omitzero"`
-	CreatedAtAlias CreatedAtAlias `json:"createdAtAlias,omitzero"`
-	InlineCount    *int32         `json:"inlineCount,omitempty"`
-	MaybeCount     MaybeCount     `json:"maybeCount,omitempty"`
-	Ratio          Ratio          `json:"ratio,omitempty"`
-	Tags           Tags           `json:"tags,omitzero"`
+	Coords         *Coords         `json:"coords,omitempty"`
+	Count          *Count          `json:"count,omitempty"`
+	CountAlias     *CountAlias     `json:"countAlias,omitempty"`
+	CreatedAt      *CreatedAt      `json:"createdAt,omitempty"`
+	CreatedAtAlias *CreatedAtAlias `json:"createdAtAlias,omitempty"`
+	InlineCount    *int32          `json:"inlineCount,omitempty"`
+	MaybeCount     MaybeCount      `json:"maybeCount,omitempty"`
+	Ratio          *Ratio          `json:"ratio,omitempty"`
+	Tags           Tags            `json:"tags,omitzero"`
 }
 
 type MaybeCount *int32
