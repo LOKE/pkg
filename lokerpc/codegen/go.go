@@ -56,6 +56,10 @@ func optionalField(schema jtd.Schema, name string, g goGen) (goType, omit string
 	switch resolved.Form() {
 	case jtd.FormElements, jtd.FormValues:
 		return t, "omitzero"
+	case jtd.FormDiscriminator:
+		// An envelope with no variant set refuses to marshal, and omitempty
+		// never omits a struct.
+		return "*" + t, "omitempty"
 	case jtd.FormType:
 		switch resolved.Type {
 		case jtd.TypeTimestamp:
@@ -126,9 +130,9 @@ func genGoType(schema jtd.Schema, name string, root bool, g goGen) string {
 			t += "bool"
 		}
 	case jtd.FormElements:
-		t += "[]" + genGoType(*schema.Elements, name, false, g)
+		t += "[]" + genGoType(*schema.Elements, name+"Item", false, g)
 	case jtd.FormValues:
-		t += "map[string]" + genGoType(*schema.Values, name, false, g)
+		t += "map[string]" + genGoType(*schema.Values, name+"Value", false, g)
 	case jtd.FormProperties:
 		t += "struct {\n"
 		for _, k := range sortedKeys(schema.Properties) {
@@ -140,12 +144,17 @@ func genGoType(schema jtd.Schema, name string, root bool, g goGen) string {
 		}
 		t += "}"
 	case jtd.FormDiscriminator:
-		body := union(schema, name, g)
-		if root {
-			t += body
+		if root && !schema.Nullable {
+			t += union(schema, name, g)
 		} else {
-			fmt.Fprintf(g.decls, "\ntype %s %s\n", name, body)
-			t += name
+			// Methods can't hang off a pointer type, so a nullable definition
+			// points at a separately named envelope.
+			envelope := name
+			if root {
+				envelope += "Union"
+			}
+			fmt.Fprintf(g.decls, "\ntype %s %s\n", envelope, union(schema, envelope, g))
+			t += envelope
 		}
 	case jtd.FormEnum:
 		// Could do more here, but this is good enough for now
@@ -164,8 +173,10 @@ func genGoType(schema jtd.Schema, name string, root bool, g goGen) string {
 
 // defAssign picks the separator for a type definition. Timestamps, including
 // those reached through a chain of refs, become aliases so they keep
-// time.Time's JSON marshalling.
+// time.Time's JSON marshalling. Refs to a union alias it for the same reason:
+// a defined type would drop the envelope's MarshalJSON/UnmarshalJSON.
 func defAssign(def jtd.Schema, defs map[string]jtd.Schema) string {
+	isRef := def.Form() == jtd.FormRef
 	seen := map[string]bool{}
 	for def.Form() == jtd.FormRef && !seen[*def.Ref] {
 		seen[*def.Ref] = true
@@ -174,11 +185,16 @@ func defAssign(def jtd.Schema, defs map[string]jtd.Schema) string {
 	if def.Form() == jtd.FormType && def.Type == jtd.TypeTimestamp {
 		return " = "
 	}
+	if isRef && def.Form() == jtd.FormDiscriminator {
+		return " = "
+	}
 	return " "
 }
 
 // union emits a oneof-style envelope: one pointer field per variant, with
-// MarshalJSON/UnmarshalJSON translating to and from the tagged wire form.
+// MarshalJSON/UnmarshalJSON translating to and from the tagged wire form. An
+// unknown tag decodes to an empty envelope so a server adding a variant
+// doesn't break deployed clients.
 func union(schema jtd.Schema, name string, g goGen) string {
 	g.imports["encoding/json"] = struct{}{}
 	g.imports["fmt"] = struct{}{}
@@ -199,6 +215,13 @@ func union(schema jtd.Schema, name string, g goGen) string {
 	tagField := goFieldName(schema.Discriminator)
 	m := g.decls
 	fmt.Fprintf(m, "\nfunc (v %s) MarshalJSON() ([]byte, error) {\n", name)
+	m.WriteString("\tset := 0\n")
+	for _, k := range keys {
+		fmt.Fprintf(m, "\tif v.%s != nil {\n\t\tset++\n\t}\n", variantName(k))
+	}
+	m.WriteString("\tif set > 1 {\n")
+	fmt.Fprintf(m, "\t\treturn nil, fmt.Errorf(\"%s: %%d variants set, want one\", set)\n", name)
+	m.WriteString("\t}\n")
 	m.WriteString("\tswitch {\n")
 	for i, k := range keys {
 		fmt.Fprintf(m, "\tcase v.%s != nil:\n", variantName(k))
@@ -211,6 +234,9 @@ func union(schema jtd.Schema, name string, g goGen) string {
 	fmt.Fprintf(m, "\nfunc (v *%s) UnmarshalJSON(b []byte) error {\n", name)
 	fmt.Fprintf(m, "\tvar tag struct {\n\t\t%s string `json:\"%s\"`\n\t}\n", tagField, schema.Discriminator)
 	m.WriteString("\tif err := json.Unmarshal(b, &tag); err != nil {\n\t\treturn err\n\t}\n")
+	fmt.Fprintf(m, "\tif tag.%s == \"\" {\n", tagField)
+	fmt.Fprintf(m, "\t\treturn fmt.Errorf(\"%s: missing %s\")\n", name, schema.Discriminator)
+	m.WriteString("\t}\n")
 	fmt.Fprintf(m, "\t*v = %s{}\n", name)
 	fmt.Fprintf(m, "\tswitch tag.%s {\n", tagField)
 	for i, k := range keys {
@@ -219,7 +245,7 @@ func union(schema jtd.Schema, name string, g goGen) string {
 		fmt.Fprintf(m, "\t\treturn json.Unmarshal(b, v.%s)\n", variantName(k))
 	}
 	m.WriteString("\t}\n")
-	fmt.Fprintf(m, "\treturn fmt.Errorf(\"%s: unknown %s %%q\", tag.%s)\n", name, schema.Discriminator, tagField)
+	m.WriteString("\treturn nil\n")
 	m.WriteString("}\n")
 
 	return body
@@ -258,7 +284,7 @@ func refAlreadyPointer(schema jtd.Schema, resolvedType string, hoisted map[strin
 		return true
 	}
 	if schema.Ref != nil && !hoisted[*schema.Ref] {
-		return strings.HasPrefix(genGoType(g.defs[*schema.Ref], goFieldName(*schema.Ref), true, g), "*")
+		return g.defs[*schema.Ref].Nullable
 	}
 	return false
 }
