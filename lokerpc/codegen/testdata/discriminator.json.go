@@ -33,6 +33,19 @@ type Hello1RequestThingUserPaymentPlanChanged struct {
 }
 
 func (v Hello1RequestThing) MarshalJSON() ([]byte, error) {
+	set := 0
+	if v.UserCreated != nil {
+		set++
+	}
+	if v.UserDeleted != nil {
+		set++
+	}
+	if v.UserPaymentPlanChanged != nil {
+		set++
+	}
+	if set > 1 {
+		return nil, fmt.Errorf("Hello1RequestThing: %d variants set, want one", set)
+	}
 	switch {
 	case v.UserCreated != nil:
 		return json.Marshal(struct {
@@ -60,6 +73,9 @@ func (v *Hello1RequestThing) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &tag); err != nil {
 		return err
 	}
+	if tag.EventType == "" {
+		return fmt.Errorf("Hello1RequestThing: missing eventType")
+	}
 	*v = Hello1RequestThing{}
 	switch tag.EventType {
 	case "USER_CREATED":
@@ -72,7 +88,7 @@ func (v *Hello1RequestThing) UnmarshalJSON(b []byte) error {
 		v.UserPaymentPlanChanged = &Hello1RequestThingUserPaymentPlanChanged{}
 		return json.Unmarshal(b, v.UserPaymentPlanChanged)
 	}
-	return fmt.Errorf("Hello1RequestThing: unknown eventType %q", tag.EventType)
+	return nil
 }
 
 type Hello1RequestThing struct {
@@ -96,6 +112,19 @@ type Hello1ResponseUserPaymentPlanChanged struct {
 }
 
 func (v Hello1Response) MarshalJSON() ([]byte, error) {
+	set := 0
+	if v.UserCreated != nil {
+		set++
+	}
+	if v.UserDeleted != nil {
+		set++
+	}
+	if v.UserPaymentPlanChanged != nil {
+		set++
+	}
+	if set > 1 {
+		return nil, fmt.Errorf("Hello1Response: %d variants set, want one", set)
+	}
 	switch {
 	case v.UserCreated != nil:
 		return json.Marshal(struct {
@@ -123,6 +152,9 @@ func (v *Hello1Response) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &tag); err != nil {
 		return err
 	}
+	if tag.EventType == "" {
+		return fmt.Errorf("Hello1Response: missing eventType")
+	}
 	*v = Hello1Response{}
 	switch tag.EventType {
 	case "USER_CREATED":
@@ -135,7 +167,7 @@ func (v *Hello1Response) UnmarshalJSON(b []byte) error {
 		v.UserPaymentPlanChanged = &Hello1ResponseUserPaymentPlanChanged{}
 		return json.Unmarshal(b, v.UserPaymentPlanChanged)
 	}
-	return fmt.Errorf("Hello1Response: unknown eventType %q", tag.EventType)
+	return nil
 }
 
 type Service1Service interface {

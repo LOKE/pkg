@@ -1,0 +1,72 @@
+{
+  "serviceName": "events",
+  "help": "union shapes",
+  "multiArg": false,
+  "definitions": {
+    "Change": {
+      "discriminator": "type",
+      "mapping": {
+        "CREATED": { "properties": { "id": { "type": "string" } } }
+      }
+    },
+    "ChangeAlias": { "ref": "Change" },
+    "Event": {
+      "discriminator": "type",
+      "mapping": {
+        "CREATED": { "properties": { "id": { "type": "string" } } },
+        "DELETED": { "properties": { "id": { "type": "string" } } }
+      },
+      "nullable": true
+    },
+    "EventsByID": {
+      "values": {
+        "discriminator": "type",
+        "mapping": {
+          "CREATED": { "properties": { "id": { "type": "string" } } }
+        }
+      }
+    }
+  },
+  "interfaces": [
+    {
+      "help": "latest event",
+      "methodName": "latest",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "responseTypeDef": { "ref": "Event" }
+    },
+    {
+      "help": "list events",
+      "methodName": "list",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "responseTypeDef": {
+        "elements": {
+          "discriminator": "type",
+          "mapping": {
+            "CREATED": { "properties": { "id": { "type": "string" } } },
+            "DELETED": { "properties": { "id": { "type": "string" } } }
+          }
+        }
+      }
+    },
+    {
+      "help": "publish an event",
+      "methodName": "publish",
+      "methodTimeout": 60000,
+      "paramNames": [],
+      "requestTypeDef": {
+        "properties": { "id": { "type": "string" } },
+        "optionalProperties": {
+          "event": {
+            "discriminator": "type",
+            "mapping": {
+              "CREATED": { "properties": { "id": { "type": "string" } } }
+            }
+          }
+        }
+      },
+      "responseTypeDef": { "metadata": { "void": true } }
+    }
+  ]
+}

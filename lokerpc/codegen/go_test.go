@@ -3,7 +3,12 @@ package codegen
 import (
 	"bytes"
 	"encoding/json"
+	"go/ast"
 	"go/format"
+	"go/importer"
+	"go/parser"
+	"go/token"
+	"go/types"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,6 +21,9 @@ func TestGenGoClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	fset := token.NewFileSet()
+	imp := importer.ForCompiler(fset, "source", nil)
 
 	for _, p := range paths {
 		t.Run(p, func(t *testing.T) {
@@ -48,6 +56,15 @@ func TestGenGoClient(t *testing.T) {
 				// Some fixtures (e.g., spaces-hyphens.json) produce fields that are
 				// not valid Go identifiers. This is a known codegen limitation.
 				t.Skipf("generated code is not valid Go: %v", err)
+			}
+
+			file, err := parser.ParseFile(fset, p+".go", formatted, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			conf := types.Config{Importer: imp}
+			if _, err := conf.Check("", fset, []*ast.File{file}, nil); err != nil {
+				t.Errorf("generated code does not type-check: %v", err)
 			}
 
 			goldenPath := p + ".go"
