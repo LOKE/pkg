@@ -206,11 +206,16 @@ func union(schema jtd.Schema, name string, g goGen) string {
 		fmt.Fprintf(g.decls, "\ntype %s %s\n", variants[i], genGoType(schema.Mapping[k], variants[i], true, g))
 	}
 
-	body := "struct {\n"
+	var body strings.Builder
+	body.WriteString("struct {\n")
 	for i := range keys {
-		body += "\t" + variantName(keys[i]) + " *" + variants[i] + "\n"
+		body.WriteString("\t")
+		body.WriteString(variantName(keys[i]))
+		body.WriteString(" *")
+		body.WriteString(variants[i])
+		body.WriteString("\n")
 	}
-	body += "}"
+	body.WriteString("}")
 
 	tagField := goFieldName(schema.Discriminator)
 	m := g.decls
@@ -248,7 +253,7 @@ func union(schema jtd.Schema, name string, g goGen) string {
 	m.WriteString("\treturn nil\n")
 	m.WriteString("}\n")
 
-	return body
+	return body.String()
 }
 
 // SCREAMING_CASE tags would otherwise collapse to USERCREATED.
