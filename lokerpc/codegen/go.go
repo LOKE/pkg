@@ -191,73 +191,68 @@ func defAssign(def jtd.Schema, defs map[string]jtd.Schema) string {
 	return " "
 }
 
-// union emits a oneof-style envelope: one pointer field per variant, with
-// MarshalJSON/UnmarshalJSON translating to and from the tagged wire form. An
-// unknown tag decodes to an empty envelope so a server adding a variant
-// doesn't break deployed clients.
 func union(schema jtd.Schema, name string, g goGen) string {
 	g.imports["encoding/json"] = struct{}{}
 	g.imports["fmt"] = struct{}{}
 
 	keys := sortedKeys(schema.Mapping)
 	variants := make([]string, len(keys))
+	marker := "is" + name + "Variant"
+	used := map[string]bool{name: true, name + "Variant": true}
+	m := g.decls
+	fmt.Fprintf(m, "\ntype %sVariant interface { %s() }\n", name, marker)
 	for i, k := range keys {
 		variants[i] = name + variantName(k)
-		fmt.Fprintf(g.decls, "\ntype %s %s\n", variants[i], genGoType(schema.Mapping[k], variants[i], true, g))
+		for used[variants[i]] {
+			variants[i] += "Value"
+		}
+		used[variants[i]] = true
+		fmt.Fprintf(m, "\ntype %s %s\n", variants[i], genGoType(schema.Mapping[k], variants[i], true, g))
+		fmt.Fprintf(m, "\nfunc (%s) %s() {}\n", variants[i], marker)
 	}
-
-	var body strings.Builder
-	body.WriteString("struct {\n")
-	for i := range keys {
-		body.WriteString("\t")
-		body.WriteString(variantName(keys[i]))
-		body.WriteString(" *")
-		body.WriteString(variants[i])
-		body.WriteString("\n")
+	unknown := name + "Unknown"
+	for used[unknown] {
+		unknown += "Unknown"
 	}
-	body.WriteString("}")
+	fmt.Fprintf(m, "\ntype %s struct {\n\tTag string\n\tRaw json.RawMessage\n}\n", unknown)
+	fmt.Fprintf(m, "\nfunc (%s) %s() {}\n", unknown, marker)
 
-	tagField := goFieldName(schema.Discriminator)
-	m := g.decls
 	fmt.Fprintf(m, "\nfunc (v %s) MarshalJSON() ([]byte, error) {\n", name)
-	m.WriteString("\tset := 0\n")
-	for _, k := range keys {
-		fmt.Fprintf(m, "\tif v.%s != nil {\n\t\tset++\n\t}\n", variantName(k))
-	}
-	m.WriteString("\tif set > 1 {\n")
-	fmt.Fprintf(m, "\t\treturn nil, fmt.Errorf(\"%s: %%d variants set, want one\", set)\n", name)
-	m.WriteString("\t}\n")
-	m.WriteString("\tswitch {\n")
+	m.WriteString("\tswitch value := v.Value.(type) {\n")
 	for i, k := range keys {
-		fmt.Fprintf(m, "\tcase v.%s != nil:\n", variantName(k))
-		fmt.Fprintf(m, "\t\treturn json.Marshal(struct {\n\t\t\t%s string `json:\"%s\"`\n\t\t\t*%s\n\t\t}{%q, v.%s})\n", tagField, schema.Discriminator, variants[i], k, variantName(k))
+		fmt.Fprintf(m, "\tcase %s:\n", variants[i])
+		fmt.Fprintf(m, "\t\treturn json.Marshal(struct {\n\t\t\tTag string `json:\"%s\"`\n\t\t\t%s\n\t\t}{%q, value})\n", schema.Discriminator, variants[i], k)
+	}
+	fmt.Fprintf(m, "\tcase %s:\n", unknown)
+	fmt.Fprintf(m, "\t\tvar tag struct { Tag *string `json:\"%s\"` }\n", schema.Discriminator)
+	m.WriteString("\t\tif err := json.Unmarshal(value.Raw, &tag); err != nil {\n\t\t\treturn nil, err\n\t\t}\n")
+	fmt.Fprintf(m, "\t\tif tag.Tag == nil || *tag.Tag != value.Tag {\n\t\t\treturn nil, fmt.Errorf(%q)\n\t\t}\n", name+": unknown variant tag does not match payload")
+	m.WriteString("\t\treturn value.Raw, nil\n")
+	for _, variant := range append(variants, unknown) {
+		fmt.Fprintf(m, "\tcase *%s:\n\t\tif value != nil {\n\t\t\treturn (%s{Value: *value}).MarshalJSON()\n\t\t}\n", variant, name)
 	}
 	m.WriteString("\t}\n")
-	fmt.Fprintf(m, "\treturn nil, fmt.Errorf(\"%s: no variant set\")\n", name)
-	m.WriteString("}\n")
+	fmt.Fprintf(m, "\treturn nil, fmt.Errorf(%q)\n}\n", name+": no variant set")
 
 	fmt.Fprintf(m, "\nfunc (v *%s) UnmarshalJSON(b []byte) error {\n", name)
-	fmt.Fprintf(m, "\tvar tag struct {\n\t\t%s string `json:\"%s\"`\n\t}\n", tagField, schema.Discriminator)
+	fmt.Fprintf(m, "\tvar tag struct { Tag *string `json:\"%s\"` }\n", schema.Discriminator)
 	m.WriteString("\tif err := json.Unmarshal(b, &tag); err != nil {\n\t\treturn err\n\t}\n")
-	fmt.Fprintf(m, "\tif tag.%s == \"\" {\n", tagField)
-	fmt.Fprintf(m, "\t\treturn fmt.Errorf(\"%s: missing %s\")\n", name, schema.Discriminator)
-	m.WriteString("\t}\n")
-	fmt.Fprintf(m, "\t*v = %s{}\n", name)
-	fmt.Fprintf(m, "\tswitch tag.%s {\n", tagField)
+	fmt.Fprintf(m, "\tif tag.Tag == nil {\n\t\treturn fmt.Errorf(%q)\n\t}\n", name+": missing "+schema.Discriminator)
+	m.WriteString("\tswitch *tag.Tag {\n")
 	for i, k := range keys {
-		fmt.Fprintf(m, "\tcase %q:\n", k)
-		fmt.Fprintf(m, "\t\tv.%s = &%s{}\n", variantName(k), variants[i])
-		fmt.Fprintf(m, "\t\treturn json.Unmarshal(b, v.%s)\n", variantName(k))
+		fmt.Fprintf(m, "\tcase %q:\n\t\tvar value %s\n", k, variants[i])
+		m.WriteString("\t\tif err := json.Unmarshal(b, &value); err != nil {\n\t\t\treturn err\n\t\t}\n\t\tv.Value = value\n")
 	}
-	m.WriteString("\t}\n")
-	m.WriteString("\treturn nil\n")
-	m.WriteString("}\n")
-
-	return body.String()
+	fmt.Fprintf(m, "\tdefault:\n\t\tv.Value = %s{Tag: *tag.Tag, Raw: append(json.RawMessage(nil), b...)}\n", unknown)
+	m.WriteString("\t}\n\treturn nil\n}\n")
+	return fmt.Sprintf("struct {\n\tValue %sVariant\n}", name)
 }
 
 // SCREAMING_CASE tags would otherwise collapse to USERCREATED.
 func variantName(tag string) string {
+	if tag == "" {
+		return "Empty"
+	}
 	if tag == strings.ToUpper(tag) {
 		tag = strings.ToLower(tag)
 	}
