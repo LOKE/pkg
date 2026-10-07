@@ -200,7 +200,7 @@ func union(schema jtd.Schema, name string, g goGen) string {
 	marker := "is" + name + "Variant"
 	used := map[string]bool{name: true, name + "Variant": true}
 	m := g.decls
-	fmt.Fprintf(m, "\ntype %sVariant interface { %s() }\n", name, marker)
+	fmt.Fprintf(m, "\ntype %sVariant interface { %s(); marshalJSON() ([]byte, error) }\n", name, marker)
 	for i, k := range keys {
 		variants[i] = name + variantName(k)
 		for used[variants[i]] {
@@ -208,31 +208,27 @@ func union(schema jtd.Schema, name string, g goGen) string {
 		}
 		used[variants[i]] = true
 		fmt.Fprintf(m, "\ntype %s %s\n", variants[i], genGoType(schema.Mapping[k], variants[i], true, g))
-		fmt.Fprintf(m, "\nfunc (%s) %s() {}\n", variants[i], marker)
+		fmt.Fprintf(m, "\nfunc (*%s) %s() {}\n", variants[i], marker)
+		fmt.Fprintf(m, "\nfunc (v *%s) marshalJSON() ([]byte, error) {\n", variants[i])
+		fmt.Fprintf(m, "\tif v == nil {\n\t\treturn nil, fmt.Errorf(%q)\n\t}\n", name+": no variant set")
+		fmt.Fprintf(m, "\treturn json.Marshal(struct {\n\t\tTag string `json:\"%s\"`\n\t\t*%s\n\t}{%q, v})\n}\n", schema.Discriminator, variants[i], k)
 	}
 	unknown := name + "Unknown"
 	for used[unknown] {
 		unknown += "Unknown"
 	}
 	fmt.Fprintf(m, "\ntype %s struct {\n\tTag string\n\tRaw json.RawMessage\n}\n", unknown)
-	fmt.Fprintf(m, "\nfunc (%s) %s() {}\n", unknown, marker)
+	fmt.Fprintf(m, "\nfunc (*%s) %s() {}\n", unknown, marker)
+	fmt.Fprintf(m, "\nfunc (v *%s) marshalJSON() ([]byte, error) {\n", unknown)
+	fmt.Fprintf(m, "\tif v == nil {\n\t\treturn nil, fmt.Errorf(%q)\n\t}\n", name+": no variant set")
+	fmt.Fprintf(m, "\tvar tag struct { Tag *string `json:\"%s\"` }\n", schema.Discriminator)
+	m.WriteString("\tif err := json.Unmarshal(v.Raw, &tag); err != nil {\n\t\treturn nil, err\n\t}\n")
+	fmt.Fprintf(m, "\tif tag.Tag == nil || *tag.Tag != v.Tag {\n\t\treturn nil, fmt.Errorf(%q)\n\t}\n", name+": unknown variant tag does not match payload")
+	m.WriteString("\treturn v.Raw, nil\n}\n")
 
 	fmt.Fprintf(m, "\nfunc (v %s) MarshalJSON() ([]byte, error) {\n", name)
-	m.WriteString("\tswitch value := v.Value.(type) {\n")
-	for i, k := range keys {
-		fmt.Fprintf(m, "\tcase %s:\n", variants[i])
-		fmt.Fprintf(m, "\t\treturn json.Marshal(struct {\n\t\t\tTag string `json:\"%s\"`\n\t\t\t%s\n\t\t}{%q, value})\n", schema.Discriminator, variants[i], k)
-	}
-	fmt.Fprintf(m, "\tcase %s:\n", unknown)
-	fmt.Fprintf(m, "\t\tvar tag struct { Tag *string `json:\"%s\"` }\n", schema.Discriminator)
-	m.WriteString("\t\tif err := json.Unmarshal(value.Raw, &tag); err != nil {\n\t\t\treturn nil, err\n\t\t}\n")
-	fmt.Fprintf(m, "\t\tif tag.Tag == nil || *tag.Tag != value.Tag {\n\t\t\treturn nil, fmt.Errorf(%q)\n\t\t}\n", name+": unknown variant tag does not match payload")
-	m.WriteString("\t\treturn value.Raw, nil\n")
-	for _, variant := range append(variants, unknown) {
-		fmt.Fprintf(m, "\tcase *%s:\n\t\tif value != nil {\n\t\t\treturn (%s{Value: *value}).MarshalJSON()\n\t\t}\n", variant, name)
-	}
-	m.WriteString("\t}\n")
-	fmt.Fprintf(m, "\treturn nil, fmt.Errorf(%q)\n}\n", name+": no variant set")
+	fmt.Fprintf(m, "\tif v.Value == nil {\n\t\treturn nil, fmt.Errorf(%q)\n\t}\n", name+": no variant set")
+	m.WriteString("\treturn v.Value.marshalJSON()\n}\n")
 
 	fmt.Fprintf(m, "\nfunc (v *%s) UnmarshalJSON(b []byte) error {\n", name)
 	fmt.Fprintf(m, "\tvar tag struct { Tag *string `json:\"%s\"` }\n", schema.Discriminator)
@@ -241,9 +237,9 @@ func union(schema jtd.Schema, name string, g goGen) string {
 	m.WriteString("\tswitch *tag.Tag {\n")
 	for i, k := range keys {
 		fmt.Fprintf(m, "\tcase %q:\n\t\tvar value %s\n", k, variants[i])
-		m.WriteString("\t\tif err := json.Unmarshal(b, &value); err != nil {\n\t\t\treturn err\n\t\t}\n\t\tv.Value = value\n")
+		m.WriteString("\t\tif err := json.Unmarshal(b, &value); err != nil {\n\t\t\treturn err\n\t\t}\n\t\tv.Value = &value\n")
 	}
-	fmt.Fprintf(m, "\tdefault:\n\t\tv.Value = %s{Tag: *tag.Tag, Raw: append(json.RawMessage(nil), b...)}\n", unknown)
+	fmt.Fprintf(m, "\tdefault:\n\t\tv.Value = &%s{Tag: *tag.Tag, Raw: append(json.RawMessage(nil), b...)}\n", unknown)
 	m.WriteString("\t}\n\treturn nil\n}\n")
 	return fmt.Sprintf("struct {\n\tValue %sVariant\n}", name)
 }

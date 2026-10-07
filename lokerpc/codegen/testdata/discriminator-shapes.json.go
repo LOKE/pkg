@@ -25,49 +25,55 @@ type PublishRequest struct {
 	Event *PublishRequestEvent `json:"event,omitempty"`
 }
 
-type ChangeVariant interface{ isChangeVariant() }
+type ChangeVariant interface {
+	isChangeVariant()
+	marshalJSON() ([]byte, error)
+}
 
 type ChangeCreated struct {
 	ID string `json:"id"`
 }
 
-func (ChangeCreated) isChangeVariant() {}
+func (*ChangeCreated) isChangeVariant() {}
+
+func (v *ChangeCreated) marshalJSON() ([]byte, error) {
+	if v == nil {
+		return nil, fmt.Errorf("Change: no variant set")
+	}
+	return json.Marshal(struct {
+		Tag string `json:"type"`
+		*ChangeCreated
+	}{"CREATED", v})
+}
 
 type ChangeUnknown struct {
 	Tag string
 	Raw json.RawMessage
 }
 
-func (ChangeUnknown) isChangeVariant() {}
+func (*ChangeUnknown) isChangeVariant() {}
+
+func (v *ChangeUnknown) marshalJSON() ([]byte, error) {
+	if v == nil {
+		return nil, fmt.Errorf("Change: no variant set")
+	}
+	var tag struct {
+		Tag *string `json:"type"`
+	}
+	if err := json.Unmarshal(v.Raw, &tag); err != nil {
+		return nil, err
+	}
+	if tag.Tag == nil || *tag.Tag != v.Tag {
+		return nil, fmt.Errorf("Change: unknown variant tag does not match payload")
+	}
+	return v.Raw, nil
+}
 
 func (v Change) MarshalJSON() ([]byte, error) {
-	switch value := v.Value.(type) {
-	case ChangeCreated:
-		return json.Marshal(struct {
-			Tag string `json:"type"`
-			ChangeCreated
-		}{"CREATED", value})
-	case ChangeUnknown:
-		var tag struct {
-			Tag *string `json:"type"`
-		}
-		if err := json.Unmarshal(value.Raw, &tag); err != nil {
-			return nil, err
-		}
-		if tag.Tag == nil || *tag.Tag != value.Tag {
-			return nil, fmt.Errorf("Change: unknown variant tag does not match payload")
-		}
-		return value.Raw, nil
-	case *ChangeCreated:
-		if value != nil {
-			return (Change{Value: *value}).MarshalJSON()
-		}
-	case *ChangeUnknown:
-		if value != nil {
-			return (Change{Value: *value}).MarshalJSON()
-		}
+	if v.Value == nil {
+		return nil, fmt.Errorf("Change: no variant set")
 	}
-	return nil, fmt.Errorf("Change: no variant set")
+	return v.Value.marshalJSON()
 }
 
 func (v *Change) UnmarshalJSON(b []byte) error {
@@ -86,71 +92,78 @@ func (v *Change) UnmarshalJSON(b []byte) error {
 		if err := json.Unmarshal(b, &value); err != nil {
 			return err
 		}
-		v.Value = value
+		v.Value = &value
 	default:
-		v.Value = ChangeUnknown{Tag: *tag.Tag, Raw: append(json.RawMessage(nil), b...)}
+		v.Value = &ChangeUnknown{Tag: *tag.Tag, Raw: append(json.RawMessage(nil), b...)}
 	}
 	return nil
 }
 
-type EventUnionVariant interface{ isEventUnionVariant() }
+type EventUnionVariant interface {
+	isEventUnionVariant()
+	marshalJSON() ([]byte, error)
+}
 
 type EventUnionCreated struct {
 	ID string `json:"id"`
 }
 
-func (EventUnionCreated) isEventUnionVariant() {}
+func (*EventUnionCreated) isEventUnionVariant() {}
+
+func (v *EventUnionCreated) marshalJSON() ([]byte, error) {
+	if v == nil {
+		return nil, fmt.Errorf("EventUnion: no variant set")
+	}
+	return json.Marshal(struct {
+		Tag string `json:"type"`
+		*EventUnionCreated
+	}{"CREATED", v})
+}
 
 type EventUnionDeleted struct {
 	ID string `json:"id"`
 }
 
-func (EventUnionDeleted) isEventUnionVariant() {}
+func (*EventUnionDeleted) isEventUnionVariant() {}
+
+func (v *EventUnionDeleted) marshalJSON() ([]byte, error) {
+	if v == nil {
+		return nil, fmt.Errorf("EventUnion: no variant set")
+	}
+	return json.Marshal(struct {
+		Tag string `json:"type"`
+		*EventUnionDeleted
+	}{"DELETED", v})
+}
 
 type EventUnionUnknown struct {
 	Tag string
 	Raw json.RawMessage
 }
 
-func (EventUnionUnknown) isEventUnionVariant() {}
+func (*EventUnionUnknown) isEventUnionVariant() {}
+
+func (v *EventUnionUnknown) marshalJSON() ([]byte, error) {
+	if v == nil {
+		return nil, fmt.Errorf("EventUnion: no variant set")
+	}
+	var tag struct {
+		Tag *string `json:"type"`
+	}
+	if err := json.Unmarshal(v.Raw, &tag); err != nil {
+		return nil, err
+	}
+	if tag.Tag == nil || *tag.Tag != v.Tag {
+		return nil, fmt.Errorf("EventUnion: unknown variant tag does not match payload")
+	}
+	return v.Raw, nil
+}
 
 func (v EventUnion) MarshalJSON() ([]byte, error) {
-	switch value := v.Value.(type) {
-	case EventUnionCreated:
-		return json.Marshal(struct {
-			Tag string `json:"type"`
-			EventUnionCreated
-		}{"CREATED", value})
-	case EventUnionDeleted:
-		return json.Marshal(struct {
-			Tag string `json:"type"`
-			EventUnionDeleted
-		}{"DELETED", value})
-	case EventUnionUnknown:
-		var tag struct {
-			Tag *string `json:"type"`
-		}
-		if err := json.Unmarshal(value.Raw, &tag); err != nil {
-			return nil, err
-		}
-		if tag.Tag == nil || *tag.Tag != value.Tag {
-			return nil, fmt.Errorf("EventUnion: unknown variant tag does not match payload")
-		}
-		return value.Raw, nil
-	case *EventUnionCreated:
-		if value != nil {
-			return (EventUnion{Value: *value}).MarshalJSON()
-		}
-	case *EventUnionDeleted:
-		if value != nil {
-			return (EventUnion{Value: *value}).MarshalJSON()
-		}
-	case *EventUnionUnknown:
-		if value != nil {
-			return (EventUnion{Value: *value}).MarshalJSON()
-		}
+	if v.Value == nil {
+		return nil, fmt.Errorf("EventUnion: no variant set")
 	}
-	return nil, fmt.Errorf("EventUnion: no variant set")
+	return v.Value.marshalJSON()
 }
 
 func (v *EventUnion) UnmarshalJSON(b []byte) error {
@@ -169,15 +182,15 @@ func (v *EventUnion) UnmarshalJSON(b []byte) error {
 		if err := json.Unmarshal(b, &value); err != nil {
 			return err
 		}
-		v.Value = value
+		v.Value = &value
 	case "DELETED":
 		var value EventUnionDeleted
 		if err := json.Unmarshal(b, &value); err != nil {
 			return err
 		}
-		v.Value = value
+		v.Value = &value
 	default:
-		v.Value = EventUnionUnknown{Tag: *tag.Tag, Raw: append(json.RawMessage(nil), b...)}
+		v.Value = &EventUnionUnknown{Tag: *tag.Tag, Raw: append(json.RawMessage(nil), b...)}
 	}
 	return nil
 }
@@ -186,49 +199,55 @@ type EventUnion struct {
 	Value EventUnionVariant
 }
 
-type EventsByIDValueVariant interface{ isEventsByIDValueVariant() }
+type EventsByIDValueVariant interface {
+	isEventsByIDValueVariant()
+	marshalJSON() ([]byte, error)
+}
 
 type EventsByIDValueCreated struct {
 	ID string `json:"id"`
 }
 
-func (EventsByIDValueCreated) isEventsByIDValueVariant() {}
+func (*EventsByIDValueCreated) isEventsByIDValueVariant() {}
+
+func (v *EventsByIDValueCreated) marshalJSON() ([]byte, error) {
+	if v == nil {
+		return nil, fmt.Errorf("EventsByIDValue: no variant set")
+	}
+	return json.Marshal(struct {
+		Tag string `json:"type"`
+		*EventsByIDValueCreated
+	}{"CREATED", v})
+}
 
 type EventsByIDValueUnknown struct {
 	Tag string
 	Raw json.RawMessage
 }
 
-func (EventsByIDValueUnknown) isEventsByIDValueVariant() {}
+func (*EventsByIDValueUnknown) isEventsByIDValueVariant() {}
+
+func (v *EventsByIDValueUnknown) marshalJSON() ([]byte, error) {
+	if v == nil {
+		return nil, fmt.Errorf("EventsByIDValue: no variant set")
+	}
+	var tag struct {
+		Tag *string `json:"type"`
+	}
+	if err := json.Unmarshal(v.Raw, &tag); err != nil {
+		return nil, err
+	}
+	if tag.Tag == nil || *tag.Tag != v.Tag {
+		return nil, fmt.Errorf("EventsByIDValue: unknown variant tag does not match payload")
+	}
+	return v.Raw, nil
+}
 
 func (v EventsByIDValue) MarshalJSON() ([]byte, error) {
-	switch value := v.Value.(type) {
-	case EventsByIDValueCreated:
-		return json.Marshal(struct {
-			Tag string `json:"type"`
-			EventsByIDValueCreated
-		}{"CREATED", value})
-	case EventsByIDValueUnknown:
-		var tag struct {
-			Tag *string `json:"type"`
-		}
-		if err := json.Unmarshal(value.Raw, &tag); err != nil {
-			return nil, err
-		}
-		if tag.Tag == nil || *tag.Tag != value.Tag {
-			return nil, fmt.Errorf("EventsByIDValue: unknown variant tag does not match payload")
-		}
-		return value.Raw, nil
-	case *EventsByIDValueCreated:
-		if value != nil {
-			return (EventsByIDValue{Value: *value}).MarshalJSON()
-		}
-	case *EventsByIDValueUnknown:
-		if value != nil {
-			return (EventsByIDValue{Value: *value}).MarshalJSON()
-		}
+	if v.Value == nil {
+		return nil, fmt.Errorf("EventsByIDValue: no variant set")
 	}
-	return nil, fmt.Errorf("EventsByIDValue: no variant set")
+	return v.Value.marshalJSON()
 }
 
 func (v *EventsByIDValue) UnmarshalJSON(b []byte) error {
@@ -247,9 +266,9 @@ func (v *EventsByIDValue) UnmarshalJSON(b []byte) error {
 		if err := json.Unmarshal(b, &value); err != nil {
 			return err
 		}
-		v.Value = value
+		v.Value = &value
 	default:
-		v.Value = EventsByIDValueUnknown{Tag: *tag.Tag, Raw: append(json.RawMessage(nil), b...)}
+		v.Value = &EventsByIDValueUnknown{Tag: *tag.Tag, Raw: append(json.RawMessage(nil), b...)}
 	}
 	return nil
 }
@@ -258,64 +277,71 @@ type EventsByIDValue struct {
 	Value EventsByIDValueVariant
 }
 
-type ListResponseItemVariant interface{ isListResponseItemVariant() }
+type ListResponseItemVariant interface {
+	isListResponseItemVariant()
+	marshalJSON() ([]byte, error)
+}
 
 type ListResponseItemCreated struct {
 	ID string `json:"id"`
 }
 
-func (ListResponseItemCreated) isListResponseItemVariant() {}
+func (*ListResponseItemCreated) isListResponseItemVariant() {}
+
+func (v *ListResponseItemCreated) marshalJSON() ([]byte, error) {
+	if v == nil {
+		return nil, fmt.Errorf("ListResponseItem: no variant set")
+	}
+	return json.Marshal(struct {
+		Tag string `json:"type"`
+		*ListResponseItemCreated
+	}{"CREATED", v})
+}
 
 type ListResponseItemDeleted struct {
 	ID string `json:"id"`
 }
 
-func (ListResponseItemDeleted) isListResponseItemVariant() {}
+func (*ListResponseItemDeleted) isListResponseItemVariant() {}
+
+func (v *ListResponseItemDeleted) marshalJSON() ([]byte, error) {
+	if v == nil {
+		return nil, fmt.Errorf("ListResponseItem: no variant set")
+	}
+	return json.Marshal(struct {
+		Tag string `json:"type"`
+		*ListResponseItemDeleted
+	}{"DELETED", v})
+}
 
 type ListResponseItemUnknown struct {
 	Tag string
 	Raw json.RawMessage
 }
 
-func (ListResponseItemUnknown) isListResponseItemVariant() {}
+func (*ListResponseItemUnknown) isListResponseItemVariant() {}
+
+func (v *ListResponseItemUnknown) marshalJSON() ([]byte, error) {
+	if v == nil {
+		return nil, fmt.Errorf("ListResponseItem: no variant set")
+	}
+	var tag struct {
+		Tag *string `json:"type"`
+	}
+	if err := json.Unmarshal(v.Raw, &tag); err != nil {
+		return nil, err
+	}
+	if tag.Tag == nil || *tag.Tag != v.Tag {
+		return nil, fmt.Errorf("ListResponseItem: unknown variant tag does not match payload")
+	}
+	return v.Raw, nil
+}
 
 func (v ListResponseItem) MarshalJSON() ([]byte, error) {
-	switch value := v.Value.(type) {
-	case ListResponseItemCreated:
-		return json.Marshal(struct {
-			Tag string `json:"type"`
-			ListResponseItemCreated
-		}{"CREATED", value})
-	case ListResponseItemDeleted:
-		return json.Marshal(struct {
-			Tag string `json:"type"`
-			ListResponseItemDeleted
-		}{"DELETED", value})
-	case ListResponseItemUnknown:
-		var tag struct {
-			Tag *string `json:"type"`
-		}
-		if err := json.Unmarshal(value.Raw, &tag); err != nil {
-			return nil, err
-		}
-		if tag.Tag == nil || *tag.Tag != value.Tag {
-			return nil, fmt.Errorf("ListResponseItem: unknown variant tag does not match payload")
-		}
-		return value.Raw, nil
-	case *ListResponseItemCreated:
-		if value != nil {
-			return (ListResponseItem{Value: *value}).MarshalJSON()
-		}
-	case *ListResponseItemDeleted:
-		if value != nil {
-			return (ListResponseItem{Value: *value}).MarshalJSON()
-		}
-	case *ListResponseItemUnknown:
-		if value != nil {
-			return (ListResponseItem{Value: *value}).MarshalJSON()
-		}
+	if v.Value == nil {
+		return nil, fmt.Errorf("ListResponseItem: no variant set")
 	}
-	return nil, fmt.Errorf("ListResponseItem: no variant set")
+	return v.Value.marshalJSON()
 }
 
 func (v *ListResponseItem) UnmarshalJSON(b []byte) error {
@@ -334,15 +360,15 @@ func (v *ListResponseItem) UnmarshalJSON(b []byte) error {
 		if err := json.Unmarshal(b, &value); err != nil {
 			return err
 		}
-		v.Value = value
+		v.Value = &value
 	case "DELETED":
 		var value ListResponseItemDeleted
 		if err := json.Unmarshal(b, &value); err != nil {
 			return err
 		}
-		v.Value = value
+		v.Value = &value
 	default:
-		v.Value = ListResponseItemUnknown{Tag: *tag.Tag, Raw: append(json.RawMessage(nil), b...)}
+		v.Value = &ListResponseItemUnknown{Tag: *tag.Tag, Raw: append(json.RawMessage(nil), b...)}
 	}
 	return nil
 }
@@ -351,49 +377,55 @@ type ListResponseItem struct {
 	Value ListResponseItemVariant
 }
 
-type PublishRequestEventVariant interface{ isPublishRequestEventVariant() }
+type PublishRequestEventVariant interface {
+	isPublishRequestEventVariant()
+	marshalJSON() ([]byte, error)
+}
 
 type PublishRequestEventCreated struct {
 	ID string `json:"id"`
 }
 
-func (PublishRequestEventCreated) isPublishRequestEventVariant() {}
+func (*PublishRequestEventCreated) isPublishRequestEventVariant() {}
+
+func (v *PublishRequestEventCreated) marshalJSON() ([]byte, error) {
+	if v == nil {
+		return nil, fmt.Errorf("PublishRequestEvent: no variant set")
+	}
+	return json.Marshal(struct {
+		Tag string `json:"type"`
+		*PublishRequestEventCreated
+	}{"CREATED", v})
+}
 
 type PublishRequestEventUnknown struct {
 	Tag string
 	Raw json.RawMessage
 }
 
-func (PublishRequestEventUnknown) isPublishRequestEventVariant() {}
+func (*PublishRequestEventUnknown) isPublishRequestEventVariant() {}
+
+func (v *PublishRequestEventUnknown) marshalJSON() ([]byte, error) {
+	if v == nil {
+		return nil, fmt.Errorf("PublishRequestEvent: no variant set")
+	}
+	var tag struct {
+		Tag *string `json:"type"`
+	}
+	if err := json.Unmarshal(v.Raw, &tag); err != nil {
+		return nil, err
+	}
+	if tag.Tag == nil || *tag.Tag != v.Tag {
+		return nil, fmt.Errorf("PublishRequestEvent: unknown variant tag does not match payload")
+	}
+	return v.Raw, nil
+}
 
 func (v PublishRequestEvent) MarshalJSON() ([]byte, error) {
-	switch value := v.Value.(type) {
-	case PublishRequestEventCreated:
-		return json.Marshal(struct {
-			Tag string `json:"type"`
-			PublishRequestEventCreated
-		}{"CREATED", value})
-	case PublishRequestEventUnknown:
-		var tag struct {
-			Tag *string `json:"type"`
-		}
-		if err := json.Unmarshal(value.Raw, &tag); err != nil {
-			return nil, err
-		}
-		if tag.Tag == nil || *tag.Tag != value.Tag {
-			return nil, fmt.Errorf("PublishRequestEvent: unknown variant tag does not match payload")
-		}
-		return value.Raw, nil
-	case *PublishRequestEventCreated:
-		if value != nil {
-			return (PublishRequestEvent{Value: *value}).MarshalJSON()
-		}
-	case *PublishRequestEventUnknown:
-		if value != nil {
-			return (PublishRequestEvent{Value: *value}).MarshalJSON()
-		}
+	if v.Value == nil {
+		return nil, fmt.Errorf("PublishRequestEvent: no variant set")
 	}
-	return nil, fmt.Errorf("PublishRequestEvent: no variant set")
+	return v.Value.marshalJSON()
 }
 
 func (v *PublishRequestEvent) UnmarshalJSON(b []byte) error {
@@ -412,9 +444,9 @@ func (v *PublishRequestEvent) UnmarshalJSON(b []byte) error {
 		if err := json.Unmarshal(b, &value); err != nil {
 			return err
 		}
-		v.Value = value
+		v.Value = &value
 	default:
-		v.Value = PublishRequestEventUnknown{Tag: *tag.Tag, Raw: append(json.RawMessage(nil), b...)}
+		v.Value = &PublishRequestEventUnknown{Tag: *tag.Tag, Raw: append(json.RawMessage(nil), b...)}
 	}
 	return nil
 }

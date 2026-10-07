@@ -111,10 +111,26 @@ import (
 )
 
 func TestUnion(t *testing.T) {
-	for _, value := range []EventVariant{EventCreated{ID: "123"}, EventDeleted{SoftDelete: true}, EventEmpty{ID: "empty"}, EventEmptyValue{ID: "upper"}, EventVariantValue{ID: "variant"}} {
+	for _, tc := range []struct {
+		value EventVariant
+		wire string
+	}{
+		{&EventCreated{ID: "123"}, "{\"type\":\"CREATED\",\"id\":\"123\"}"},
+		{&EventDeleted{SoftDelete: true}, "{\"type\":\"DELETED\",\"softDelete\":true}"},
+		{&EventEmpty{ID: "empty"}, "{\"type\":\"\",\"id\":\"empty\"}"},
+		{&EventEmptyValue{ID: "upper"}, "{\"type\":\"EMPTY\",\"id\":\"upper\"}"},
+		{&EventVariantValue{ID: "variant"}, "{\"type\":\"VARIANT\",\"id\":\"variant\"}"},
+	} {
+		value := tc.value
 		b, err := json.Marshal(Event{Value: value})
 		if err != nil {
 			t.Fatal(err)
+		}
+		if string(b) != tc.wire {
+			t.Fatalf("got %s, want %s", b, tc.wire)
+		}
+		if _, ok := reflect.ValueOf(value).Elem().Interface().(EventVariant); ok {
+			t.Fatalf("value type %T implements EventVariant", value)
 		}
 		var got Event
 		if err := json.Unmarshal(b, &got); err != nil {
@@ -123,10 +139,6 @@ func TestUnion(t *testing.T) {
 		if !reflect.DeepEqual(got.Value, value) {
 			t.Fatalf("got %#v, want %#v", got.Value, value)
 		}
-	}
-	value := EventCreated{ID: "pointer"}
-	if _, err := json.Marshal(Event{Value: &value}); err != nil {
-		t.Fatal(err)
 	}
 	for _, value := range []EventVariant{nil, (*EventCreated)(nil), (*EventUnknown)(nil)} {
 		if _, err := json.Marshal(Event{Value: value}); err == nil {
@@ -138,7 +150,7 @@ func TestUnion(t *testing.T) {
 	if err := json.Unmarshal(raw, &event); err != nil {
 		t.Fatal(err)
 	}
-	unknown, ok := event.Value.(EventUnknown)
+	unknown, ok := event.Value.(*EventUnknown)
 	if !ok || unknown.Tag != "FUTURE" {
 		t.Fatalf("unknown: %#v", event.Value)
 	}
@@ -150,7 +162,7 @@ func TestUnion(t *testing.T) {
 	if !bytes.Equal(b, unknown.Raw) {
 		t.Fatalf("round trip: %s", b)
 	}
-	for _, value := range []EventUnknown{{Tag: "FUTURE"}, {Tag: "FUTURE", Raw: json.RawMessage("invalid")}, {Tag: "FUTURE", Raw: json.RawMessage("null")}, {Tag: "FUTURE", Raw: json.RawMessage("{\"type\":\"OTHER\"}")}} {
+	for _, value := range []*EventUnknown{{Tag: "FUTURE"}, {Tag: "FUTURE", Raw: json.RawMessage("invalid")}, {Tag: "FUTURE", Raw: json.RawMessage("null")}, {Tag: "FUTURE", Raw: json.RawMessage("{\"type\":\"OTHER\"}")}} {
 		if _, err := json.Marshal(Event{Value: value}); err == nil {
 			t.Fatalf("accepted invalid unknown %#v", value)
 		}
@@ -167,13 +179,13 @@ func TestUnion(t *testing.T) {
 	if err := json.Unmarshal([]byte("{\"type\":\"CREATED\",\"id\":\"new\"}"), &event); err != nil {
 		t.Fatal(err)
 	}
-	if got, ok := event.Value.(EventCreated); !ok || got.ID != "new" {
+	if got, ok := event.Value.(*EventCreated); !ok || got.ID != "new" {
 		t.Fatalf("reuse: %#v", event.Value)
 	}
 	if err := json.Unmarshal([]byte("{\"type\":\"DELETED\",\"softDelete\":true}"), &event); err != nil {
 		t.Fatal(err)
 	}
-	if got, ok := event.Value.(EventDeleted); !ok || !got.SoftDelete {
+	if got, ok := event.Value.(*EventDeleted); !ok || !got.SoftDelete {
 		t.Fatalf("reuse: %#v", event.Value)
 	}
 }
