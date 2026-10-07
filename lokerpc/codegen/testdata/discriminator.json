@@ -1,33 +1,42 @@
 {
-  "serviceName": "service1",
-  "help": "hello",
+  "serviceName": "activity",
+  "help": "customer activity feed",
   "multiArg": false,
   "interfaces": [
     {
-      "help": "hello1 method",
-      "methodName": "hello1",
+      "help": "Add an item to a customer's activity feed",
+      "methodName": "addActivity",
       "methodTimeout": 60000,
       "paramNames": [],
       "requestTypeDef": {
         "properties": {
-          "thing": {
-            "discriminator": "eventType",
+          "customerUid": { "type": "string" },
+          "item": {
+            "discriminator": "type",
             "mapping": {
-              "USER_CREATED": {
+              "MESSAGE": {
                 "properties": {
-                  "id": { "type": "string" }
+                  "title": { "type": "string" },
+                  "body": { "type": "string" }
+                },
+                "optionalProperties": {
+                  "locationName": { "type": "string" }
                 }
               },
-              "USER_PAYMENT_PLAN_CHANGED": {
+              "POINTS": {
                 "properties": {
-                  "id": { "type": "string" },
-                  "plan": { "enum": ["FREE", "PAID"] }
+                  "title": { "type": "string" },
+                  "points": { "type": "int32" }
+                },
+                "optionalProperties": {
+                  "locationName": { "type": "string" }
                 }
               },
-              "USER_DELETED": {
+              "CREDIT_EXPIRED": {
                 "properties": {
-                  "id": { "type": "string" },
-                  "softDelete": { "type": "boolean" }
+                  "title": { "type": "string" },
+                  "creditId": { "type": "string" },
+                  "amount": { "type": "int32" }
                 }
               }
             }
@@ -35,23 +44,38 @@
         }
       },
       "responseTypeDef": {
-        "discriminator": "eventType",
+        "discriminator": "type",
         "mapping": {
-          "USER_CREATED": {
-            "properties": {
-              "id": { "type": "string" }
-            }
-          },
-          "USER_PAYMENT_PLAN_CHANGED": {
+          "MESSAGE": {
             "properties": {
               "id": { "type": "string" },
-              "plan": { "enum": ["FREE", "PAID"] }
+              "timestamp": { "type": "timestamp" },
+              "title": { "type": "string" },
+              "body": { "type": "string" }
+            },
+            "optionalProperties": {
+              "locationName": { "type": "string" }
             }
           },
-          "USER_DELETED": {
+          "POINTS": {
             "properties": {
               "id": { "type": "string" },
-              "softDelete": { "type": "boolean" }
+              "timestamp": { "type": "timestamp" },
+              "title": { "type": "string" },
+              "points": { "type": "int32" },
+              "pointsText": { "type": "string" }
+            },
+            "optionalProperties": {
+              "locationName": { "type": "string" }
+            }
+          },
+          "CREDIT_EXPIRED": {
+            "properties": {
+              "id": { "type": "string" },
+              "timestamp": { "type": "timestamp" },
+              "title": { "type": "string" },
+              "creditId": { "type": "string" },
+              "amount": { "type": "int32" }
             }
           }
         }

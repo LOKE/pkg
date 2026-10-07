@@ -1,51 +1,67 @@
 import { RPCContextClient } from "@loke/http-rpc-client";
 import { Context } from "@loke/context";
 
-export type Hello1Request = {
-  thing: 
+export type AddActivityRequest = {
+  customerUid: string;
+  item: 
 | {
-  eventType: "USER_CREATED";
-  id: string;
+  amount: number;
+  creditId: string;
+  title: string;
+  type: "CREDIT_EXPIRED";
 }
 | {
-  eventType: "USER_DELETED";
-  id: string;
-  softDelete: boolean;
+  body: string;
+  title: string;
+  type: "MESSAGE";
+  locationName?: string;
 }
 | {
-  eventType: "USER_PAYMENT_PLAN_CHANGED";
-  id: string;
-  plan: "FREE" | "PAID";
+  points: number;
+  title: string;
+  type: "POINTS";
+  locationName?: string;
 };
 };
 
-export type Hello1Response = 
+export type AddActivityResponse = 
 | {
-  eventType: "USER_CREATED";
+  amount: number;
+  creditId: string;
   id: string;
+  timestamp: string;
+  title: string;
+  type: "CREDIT_EXPIRED";
 }
 | {
-  eventType: "USER_DELETED";
+  body: string;
   id: string;
-  softDelete: boolean;
+  timestamp: string;
+  title: string;
+  type: "MESSAGE";
+  locationName?: string;
 }
 | {
-  eventType: "USER_PAYMENT_PLAN_CHANGED";
   id: string;
-  plan: "FREE" | "PAID";
+  points: number;
+  pointsText: string;
+  timestamp: string;
+  title: string;
+  type: "POINTS";
+  locationName?: string;
 };
 
 /**
- * hello
+ * customer activity feed
  */
-export class Service1Service extends RPCContextClient {
+export class ActivityService extends RPCContextClient {
   constructor(baseUrl: string) {
-    super(baseUrl, "service1")
+    super(baseUrl, "activity")
   }
   /**
-   * hello1 method
+   * Add an item to a customer's activity feed
    */
-  hello1(ctx: Context, req: Hello1Request): Promise<Hello1Response> {
-    return this.request(ctx, "hello1", req);
+  addActivity(ctx: Context, req: AddActivityRequest): Promise<AddActivityResponse> {
+    return this.request(ctx, "addActivity", req);
   }
 }
