@@ -1,260 +1,277 @@
-package service1
+package activity
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/LOKE/pkg/lokerpc"
 )
 
-type Hello1Request struct {
-	Thing Hello1RequestThing `json:"thing"`
+type AddActivityRequest struct {
+	CustomerUid string                 `json:"customerUid"`
+	Item        AddActivityRequestItem `json:"item"`
 }
 
-type Hello1Response struct {
-	Value Hello1ResponseVariant
+type AddActivityResponse struct {
+	Value AddActivityResponseVariant
 }
 
-type Hello1RequestThingVariant interface{ isHello1RequestThingVariant() }
+type AddActivityRequestItemVariant interface{ isAddActivityRequestItemVariant() }
 
-type Hello1RequestThingUserCreated struct {
-	ID string `json:"id"`
+type AddActivityRequestItemCreditExpired struct {
+	Amount   int32  `json:"amount"`
+	CreditID string `json:"creditId"`
+	Title    string `json:"title"`
 }
 
-func (Hello1RequestThingUserCreated) isHello1RequestThingVariant() {}
+func (AddActivityRequestItemCreditExpired) isAddActivityRequestItemVariant() {}
 
-type Hello1RequestThingUserDeleted struct {
-	ID         string `json:"id"`
-	SoftDelete bool   `json:"softDelete"`
+type AddActivityRequestItemMessage struct {
+	Body         string `json:"body"`
+	Title        string `json:"title"`
+	LocationName string `json:"locationName,omitempty"`
 }
 
-func (Hello1RequestThingUserDeleted) isHello1RequestThingVariant() {}
+func (AddActivityRequestItemMessage) isAddActivityRequestItemVariant() {}
 
-type Hello1RequestThingUserPaymentPlanChanged struct {
-	ID   string `json:"id"`
-	Plan string `json:"plan"`
+type AddActivityRequestItemPoints struct {
+	Points       int32  `json:"points"`
+	Title        string `json:"title"`
+	LocationName string `json:"locationName,omitempty"`
 }
 
-func (Hello1RequestThingUserPaymentPlanChanged) isHello1RequestThingVariant() {}
+func (AddActivityRequestItemPoints) isAddActivityRequestItemVariant() {}
 
-type Hello1RequestThingUnknown struct {
+type AddActivityRequestItemUnknown struct {
 	Tag string
 	Raw json.RawMessage
 }
 
-func (Hello1RequestThingUnknown) isHello1RequestThingVariant() {}
+func (AddActivityRequestItemUnknown) isAddActivityRequestItemVariant() {}
 
-func (v Hello1RequestThing) MarshalJSON() ([]byte, error) {
+func (v AddActivityRequestItem) MarshalJSON() ([]byte, error) {
 	switch value := v.Value.(type) {
-	case Hello1RequestThingUserCreated:
+	case AddActivityRequestItemCreditExpired:
 		return json.Marshal(struct {
-			Tag string `json:"eventType"`
-			Hello1RequestThingUserCreated
-		}{"USER_CREATED", value})
-	case Hello1RequestThingUserDeleted:
+			Tag string `json:"type"`
+			AddActivityRequestItemCreditExpired
+		}{"CREDIT_EXPIRED", value})
+	case AddActivityRequestItemMessage:
 		return json.Marshal(struct {
-			Tag string `json:"eventType"`
-			Hello1RequestThingUserDeleted
-		}{"USER_DELETED", value})
-	case Hello1RequestThingUserPaymentPlanChanged:
+			Tag string `json:"type"`
+			AddActivityRequestItemMessage
+		}{"MESSAGE", value})
+	case AddActivityRequestItemPoints:
 		return json.Marshal(struct {
-			Tag string `json:"eventType"`
-			Hello1RequestThingUserPaymentPlanChanged
-		}{"USER_PAYMENT_PLAN_CHANGED", value})
-	case Hello1RequestThingUnknown:
+			Tag string `json:"type"`
+			AddActivityRequestItemPoints
+		}{"POINTS", value})
+	case AddActivityRequestItemUnknown:
 		var tag struct {
-			Tag *string `json:"eventType"`
+			Tag *string `json:"type"`
 		}
 		if err := json.Unmarshal(value.Raw, &tag); err != nil {
 			return nil, err
 		}
 		if tag.Tag == nil || *tag.Tag != value.Tag {
-			return nil, fmt.Errorf("Hello1RequestThing: unknown variant tag does not match payload")
+			return nil, fmt.Errorf("AddActivityRequestItem: unknown variant tag does not match payload")
 		}
 		return value.Raw, nil
-	case *Hello1RequestThingUserCreated:
+	case *AddActivityRequestItemCreditExpired:
 		if value != nil {
-			return (Hello1RequestThing{Value: *value}).MarshalJSON()
+			return (AddActivityRequestItem{Value: *value}).MarshalJSON()
 		}
-	case *Hello1RequestThingUserDeleted:
+	case *AddActivityRequestItemMessage:
 		if value != nil {
-			return (Hello1RequestThing{Value: *value}).MarshalJSON()
+			return (AddActivityRequestItem{Value: *value}).MarshalJSON()
 		}
-	case *Hello1RequestThingUserPaymentPlanChanged:
+	case *AddActivityRequestItemPoints:
 		if value != nil {
-			return (Hello1RequestThing{Value: *value}).MarshalJSON()
+			return (AddActivityRequestItem{Value: *value}).MarshalJSON()
 		}
-	case *Hello1RequestThingUnknown:
+	case *AddActivityRequestItemUnknown:
 		if value != nil {
-			return (Hello1RequestThing{Value: *value}).MarshalJSON()
+			return (AddActivityRequestItem{Value: *value}).MarshalJSON()
 		}
 	}
-	return nil, fmt.Errorf("Hello1RequestThing: no variant set")
+	return nil, fmt.Errorf("AddActivityRequestItem: no variant set")
 }
 
-func (v *Hello1RequestThing) UnmarshalJSON(b []byte) error {
+func (v *AddActivityRequestItem) UnmarshalJSON(b []byte) error {
 	var tag struct {
-		Tag *string `json:"eventType"`
+		Tag *string `json:"type"`
 	}
 	if err := json.Unmarshal(b, &tag); err != nil {
 		return err
 	}
 	if tag.Tag == nil {
-		return fmt.Errorf("Hello1RequestThing: missing eventType")
+		return fmt.Errorf("AddActivityRequestItem: missing type")
 	}
 	switch *tag.Tag {
-	case "USER_CREATED":
-		var value Hello1RequestThingUserCreated
+	case "CREDIT_EXPIRED":
+		var value AddActivityRequestItemCreditExpired
 		if err := json.Unmarshal(b, &value); err != nil {
 			return err
 		}
 		v.Value = value
-	case "USER_DELETED":
-		var value Hello1RequestThingUserDeleted
+	case "MESSAGE":
+		var value AddActivityRequestItemMessage
 		if err := json.Unmarshal(b, &value); err != nil {
 			return err
 		}
 		v.Value = value
-	case "USER_PAYMENT_PLAN_CHANGED":
-		var value Hello1RequestThingUserPaymentPlanChanged
+	case "POINTS":
+		var value AddActivityRequestItemPoints
 		if err := json.Unmarshal(b, &value); err != nil {
 			return err
 		}
 		v.Value = value
 	default:
-		v.Value = Hello1RequestThingUnknown{Tag: *tag.Tag, Raw: append(json.RawMessage(nil), b...)}
+		v.Value = AddActivityRequestItemUnknown{Tag: *tag.Tag, Raw: append(json.RawMessage(nil), b...)}
 	}
 	return nil
 }
 
-type Hello1RequestThing struct {
-	Value Hello1RequestThingVariant
+type AddActivityRequestItem struct {
+	Value AddActivityRequestItemVariant
 }
 
-type Hello1ResponseVariant interface{ isHello1ResponseVariant() }
+type AddActivityResponseVariant interface{ isAddActivityResponseVariant() }
 
-type Hello1ResponseUserCreated struct {
-	ID string `json:"id"`
+type AddActivityResponseCreditExpired struct {
+	Amount    int32     `json:"amount"`
+	CreditID  string    `json:"creditId"`
+	ID        string    `json:"id"`
+	Timestamp time.Time `json:"timestamp"`
+	Title     string    `json:"title"`
 }
 
-func (Hello1ResponseUserCreated) isHello1ResponseVariant() {}
+func (AddActivityResponseCreditExpired) isAddActivityResponseVariant() {}
 
-type Hello1ResponseUserDeleted struct {
-	ID         string `json:"id"`
-	SoftDelete bool   `json:"softDelete"`
+type AddActivityResponseMessage struct {
+	Body         string    `json:"body"`
+	ID           string    `json:"id"`
+	Timestamp    time.Time `json:"timestamp"`
+	Title        string    `json:"title"`
+	LocationName string    `json:"locationName,omitempty"`
 }
 
-func (Hello1ResponseUserDeleted) isHello1ResponseVariant() {}
+func (AddActivityResponseMessage) isAddActivityResponseVariant() {}
 
-type Hello1ResponseUserPaymentPlanChanged struct {
-	ID   string `json:"id"`
-	Plan string `json:"plan"`
+type AddActivityResponsePoints struct {
+	ID           string    `json:"id"`
+	Points       int32     `json:"points"`
+	PointsText   string    `json:"pointsText"`
+	Timestamp    time.Time `json:"timestamp"`
+	Title        string    `json:"title"`
+	LocationName string    `json:"locationName,omitempty"`
 }
 
-func (Hello1ResponseUserPaymentPlanChanged) isHello1ResponseVariant() {}
+func (AddActivityResponsePoints) isAddActivityResponseVariant() {}
 
-type Hello1ResponseUnknown struct {
+type AddActivityResponseUnknown struct {
 	Tag string
 	Raw json.RawMessage
 }
 
-func (Hello1ResponseUnknown) isHello1ResponseVariant() {}
+func (AddActivityResponseUnknown) isAddActivityResponseVariant() {}
 
-func (v Hello1Response) MarshalJSON() ([]byte, error) {
+func (v AddActivityResponse) MarshalJSON() ([]byte, error) {
 	switch value := v.Value.(type) {
-	case Hello1ResponseUserCreated:
+	case AddActivityResponseCreditExpired:
 		return json.Marshal(struct {
-			Tag string `json:"eventType"`
-			Hello1ResponseUserCreated
-		}{"USER_CREATED", value})
-	case Hello1ResponseUserDeleted:
+			Tag string `json:"type"`
+			AddActivityResponseCreditExpired
+		}{"CREDIT_EXPIRED", value})
+	case AddActivityResponseMessage:
 		return json.Marshal(struct {
-			Tag string `json:"eventType"`
-			Hello1ResponseUserDeleted
-		}{"USER_DELETED", value})
-	case Hello1ResponseUserPaymentPlanChanged:
+			Tag string `json:"type"`
+			AddActivityResponseMessage
+		}{"MESSAGE", value})
+	case AddActivityResponsePoints:
 		return json.Marshal(struct {
-			Tag string `json:"eventType"`
-			Hello1ResponseUserPaymentPlanChanged
-		}{"USER_PAYMENT_PLAN_CHANGED", value})
-	case Hello1ResponseUnknown:
+			Tag string `json:"type"`
+			AddActivityResponsePoints
+		}{"POINTS", value})
+	case AddActivityResponseUnknown:
 		var tag struct {
-			Tag *string `json:"eventType"`
+			Tag *string `json:"type"`
 		}
 		if err := json.Unmarshal(value.Raw, &tag); err != nil {
 			return nil, err
 		}
 		if tag.Tag == nil || *tag.Tag != value.Tag {
-			return nil, fmt.Errorf("Hello1Response: unknown variant tag does not match payload")
+			return nil, fmt.Errorf("AddActivityResponse: unknown variant tag does not match payload")
 		}
 		return value.Raw, nil
-	case *Hello1ResponseUserCreated:
+	case *AddActivityResponseCreditExpired:
 		if value != nil {
-			return (Hello1Response{Value: *value}).MarshalJSON()
+			return (AddActivityResponse{Value: *value}).MarshalJSON()
 		}
-	case *Hello1ResponseUserDeleted:
+	case *AddActivityResponseMessage:
 		if value != nil {
-			return (Hello1Response{Value: *value}).MarshalJSON()
+			return (AddActivityResponse{Value: *value}).MarshalJSON()
 		}
-	case *Hello1ResponseUserPaymentPlanChanged:
+	case *AddActivityResponsePoints:
 		if value != nil {
-			return (Hello1Response{Value: *value}).MarshalJSON()
+			return (AddActivityResponse{Value: *value}).MarshalJSON()
 		}
-	case *Hello1ResponseUnknown:
+	case *AddActivityResponseUnknown:
 		if value != nil {
-			return (Hello1Response{Value: *value}).MarshalJSON()
+			return (AddActivityResponse{Value: *value}).MarshalJSON()
 		}
 	}
-	return nil, fmt.Errorf("Hello1Response: no variant set")
+	return nil, fmt.Errorf("AddActivityResponse: no variant set")
 }
 
-func (v *Hello1Response) UnmarshalJSON(b []byte) error {
+func (v *AddActivityResponse) UnmarshalJSON(b []byte) error {
 	var tag struct {
-		Tag *string `json:"eventType"`
+		Tag *string `json:"type"`
 	}
 	if err := json.Unmarshal(b, &tag); err != nil {
 		return err
 	}
 	if tag.Tag == nil {
-		return fmt.Errorf("Hello1Response: missing eventType")
+		return fmt.Errorf("AddActivityResponse: missing type")
 	}
 	switch *tag.Tag {
-	case "USER_CREATED":
-		var value Hello1ResponseUserCreated
+	case "CREDIT_EXPIRED":
+		var value AddActivityResponseCreditExpired
 		if err := json.Unmarshal(b, &value); err != nil {
 			return err
 		}
 		v.Value = value
-	case "USER_DELETED":
-		var value Hello1ResponseUserDeleted
+	case "MESSAGE":
+		var value AddActivityResponseMessage
 		if err := json.Unmarshal(b, &value); err != nil {
 			return err
 		}
 		v.Value = value
-	case "USER_PAYMENT_PLAN_CHANGED":
-		var value Hello1ResponseUserPaymentPlanChanged
+	case "POINTS":
+		var value AddActivityResponsePoints
 		if err := json.Unmarshal(b, &value); err != nil {
 			return err
 		}
 		v.Value = value
 	default:
-		v.Value = Hello1ResponseUnknown{Tag: *tag.Tag, Raw: append(json.RawMessage(nil), b...)}
+		v.Value = AddActivityResponseUnknown{Tag: *tag.Tag, Raw: append(json.RawMessage(nil), b...)}
 	}
 	return nil
 }
 
-type Service1Service interface {
-	Hello1(context.Context, Hello1Request) (*Hello1Response, error)
+type ActivityService interface {
+	AddActivity(context.Context, AddActivityRequest) (*AddActivityResponse, error)
 }
 
-type Service1RPCClient struct {
+type ActivityRPCClient struct {
 	lokerpc.Client
 }
 
-func (c Service1RPCClient) Hello1(ctx context.Context, req Hello1Request) (*Hello1Response, error) {
-	var res Hello1Response
-	err := c.DoRequest(ctx, "hello1", req, &res)
+func (c ActivityRPCClient) AddActivity(ctx context.Context, req AddActivityRequest) (*AddActivityResponse, error) {
+	var res AddActivityResponse
+	err := c.DoRequest(ctx, "addActivity", req, &res)
 	if err != nil {
 		return nil, err
 	}
