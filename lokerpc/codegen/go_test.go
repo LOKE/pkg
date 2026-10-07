@@ -57,7 +57,7 @@ func TestGenGoClient(t *testing.T) {
 
 			goldenPath := p + ".go"
 			if os.Getenv("UPDATE_GOLDEN") != "" {
-				err = os.WriteFile(goldenPath, formatted, 0644)
+				err = os.WriteFile(goldenPath, formatted, 0o644)
 				if err != nil {
 					t.Fatal(err)
 				}

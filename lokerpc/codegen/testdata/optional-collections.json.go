@@ -27,6 +27,51 @@ type Customer struct {
 	Tier         *string          `json:"tier,omitempty"`
 }
 
+func (x *Customer) GetAge() (v int32) {
+	if x != nil && x.Age != nil {
+		v = *x.Age
+	}
+	return v
+}
+
+func (x *Customer) GetCoords() (v struct {
+	Lat float32 `json:"lat"`
+	Lng float32 `json:"lng"`
+}) {
+	if x != nil && x.Coords != nil {
+		v = *x.Coords
+	}
+	return v
+}
+
+func (x *Customer) GetGuest() (v bool) {
+	if x != nil && x.Guest != nil {
+		v = *x.Guest
+	}
+	return v
+}
+
+func (x *Customer) GetName() (v string) {
+	if x != nil && x.Name != nil {
+		v = *x.Name
+	}
+	return v
+}
+
+func (x *Customer) GetSeenAt() (v time.Time) {
+	if x != nil && x.SeenAt != nil {
+		v = *x.SeenAt
+	}
+	return v
+}
+
+func (x *Customer) GetTier() (v string) {
+	if x != nil && x.Tier != nil {
+		v = *x.Tier
+	}
+	return v
+}
+
 type DiscountsService interface {
 	LockDiscount(context.Context, Customer) (*Customer, error)
 }

@@ -32,6 +32,55 @@ type Filter struct {
 	Tags           Tags            `json:"tags,omitzero"`
 }
 
+func (x *Filter) GetCoords() (v Coords) {
+	if x != nil && x.Coords != nil {
+		v = *x.Coords
+	}
+	return v
+}
+
+func (x *Filter) GetCount() (v Count) {
+	if x != nil && x.Count != nil {
+		v = *x.Count
+	}
+	return v
+}
+
+func (x *Filter) GetCountAlias() (v CountAlias) {
+	if x != nil && x.CountAlias != nil {
+		v = *x.CountAlias
+	}
+	return v
+}
+
+func (x *Filter) GetCreatedAt() (v CreatedAt) {
+	if x != nil && x.CreatedAt != nil {
+		v = *x.CreatedAt
+	}
+	return v
+}
+
+func (x *Filter) GetCreatedAtAlias() (v CreatedAtAlias) {
+	if x != nil && x.CreatedAtAlias != nil {
+		v = *x.CreatedAtAlias
+	}
+	return v
+}
+
+func (x *Filter) GetInlineCount() (v int32) {
+	if x != nil && x.InlineCount != nil {
+		v = *x.InlineCount
+	}
+	return v
+}
+
+func (x *Filter) GetRatio() (v Ratio) {
+	if x != nil && x.Ratio != nil {
+		v = *x.Ratio
+	}
+	return v
+}
+
 type MaybeCount *int32
 
 type Ratio float64

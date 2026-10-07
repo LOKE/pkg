@@ -66,6 +66,50 @@ func optionalField(schema jtd.Schema, defs map[string]jtd.Schema, imports map[st
 	return t, "omitempty"
 }
 
+// Getters let callers ignore presence without repeating nil checks.
+func genGoGetters(name string, def jtd.Schema, defs map[string]jtd.Schema, imports map[string]struct{}) string {
+	seen := map[string]bool{}
+	for def.Ref != nil && !def.Nullable {
+		ref := *def.Ref
+		if seen[ref] {
+			return ""
+		}
+		seen[ref] = true
+		def = defs[ref]
+	}
+	if def.Nullable || def.Form() != jtd.FormProperties {
+		return ""
+	}
+
+	used := map[string]bool{}
+	for k := range def.Properties {
+		used[goFieldName(k)] = true
+	}
+	for k := range def.OptionalProperties {
+		used[goFieldName(k)] = true
+	}
+
+	var b strings.Builder
+	for _, k := range sortedKeys(def.OptionalProperties) {
+		prop := def.OptionalProperties[k]
+		valueType := genGoType(prop, defs, imports)
+		if propType, _ := optionalField(prop, defs, imports); propType != "*"+valueType {
+			continue
+		}
+
+		field := goFieldName(k)
+		getter := "Get" + field
+		for used[getter] {
+			getter += "_"
+		}
+		used[getter] = true
+		fmt.Fprintf(&b, "\nfunc (x *%s) %s() (v %s) {\n", name, getter, valueType)
+		fmt.Fprintf(&b, "\tif x != nil && x.%s != nil {\n\t\tv = *x.%s\n\t}\n", field, field)
+		b.WriteString("\treturn v\n}\n")
+	}
+	return b.String()
+}
+
 func GenGoType(schema jtd.Schema, imports map[string]struct{}) string {
 	return genGoType(schema, schema.Definitions, imports)
 }
@@ -252,6 +296,7 @@ func GenGoClient(w io.Writer, meta lokerpc.Meta) error {
 			def.Nullable = false
 		}
 		fmt.Fprintf(&b, "type %s%s%s;\n", goFieldName(k), defAssign(def, meta.Definitions), genGoType(def, meta.Definitions, imports))
+		b.WriteString(genGoGetters(goFieldName(k), def, meta.Definitions, imports))
 	}
 
 	// Service interface
