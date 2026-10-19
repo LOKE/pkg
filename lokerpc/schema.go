@@ -3,7 +3,9 @@ package lokerpc
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	jtd "github.com/jsontypedef/json-typedef-go"
@@ -105,6 +107,23 @@ func indirect(t reflect.Type) reflect.Type {
 	return t
 }
 
+var typeArgIdent = regexp.MustCompile(`[\w./-]+`)
+
+// typeName flattens generic instantiations into an identifier, e.g. Page[example.com/pkg.Item] -> PageItem.
+func typeName(t reflect.Type) string {
+	base, args, ok := strings.Cut(t.Name(), "[")
+	if !ok {
+		return base
+	}
+	var sb strings.Builder
+	sb.WriteString(base)
+	for _, ident := range typeArgIdent.FindAllString(args, -1) {
+		ident = ident[strings.LastIndex(ident, ".")+1:]
+		sb.WriteString(strings.ToUpper(ident[:1]) + ident[1:])
+	}
+	return sb.String()
+}
+
 func TypeSchema(t reflect.Type, tdefs map[reflect.Type]*NamedSchema) *jtd.Schema {
 	if ns, ok := tdefs[t]; ok {
 		return &jtd.Schema{Ref: &ns.Name}
@@ -128,7 +147,7 @@ func TypeSchema(t reflect.Type, tdefs map[reflect.Type]*NamedSchema) *jtd.Schema
 				break
 			}
 
-			name := t.Name()
+			name := typeName(t)
 
 			if name != "" {
 				tdefs[t] = &NamedSchema{

@@ -22,6 +22,10 @@ func (textMarshaler) MarshalText() ([]byte, error) {
 	return nil, nil
 }
 
+type genericPage[T any] struct {
+	Items []T `json:"items"`
+}
+
 func TestTypeSchema(t *testing.T) {
 	type NamedStruct struct {
 		Foo  string `json:"foo"`
@@ -318,6 +322,30 @@ func TestTypeSchema(t *testing.T) {
 				},
 				"nullable": true,
 				"ref": "RecusiveStruct"
+			}`,
+		},
+		{
+			name: "generic type",
+			args: args{
+				t: reflect.TypeFor[genericPage[flag.Flag]](),
+			},
+			want: `{
+				"definitions": {
+					"Flag": {
+						"properties": {
+							"DefValue": {"type": "string"},
+							"Name": {"type": "string"},
+							"Usage": {"type": "string"},
+							"Value": {}
+						}
+					},
+					"genericPageFlag": {
+						"properties": {
+							"items": {"elements": {"ref": "Flag"}, "nullable": true}
+						}
+					}
+				},
+				"ref": "genericPageFlag"
 			}`,
 		},
 	}
