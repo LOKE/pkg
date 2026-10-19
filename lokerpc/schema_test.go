@@ -3,6 +3,8 @@ package lokerpc
 import (
 	"encoding/json"
 	"flag"
+	"net/url"
+	"os/exec"
 	"reflect"
 	"testing"
 	"time"
@@ -346,6 +348,46 @@ func TestTypeSchema(t *testing.T) {
 					}
 				},
 				"ref": "genericPageFlag"
+			}`,
+		},
+		{
+			name: "generic name collision",
+			args: args{
+				t: reflect.TypeOf(struct {
+					A genericPage[url.Error]
+					B genericPage[exec.Error]
+				}{}),
+			},
+			want: `{
+				"definitions": {
+					"Error": {
+						"properties": {
+							"Err": {},
+							"Op": {"type": "string"},
+							"URL": {"type": "string"}
+						}
+					},
+					"Error2": {
+						"properties": {
+							"Err": {},
+							"Name": {"type": "string"}
+						}
+					},
+					"genericPageError": {
+						"properties": {
+							"items": {"elements": {"ref": "Error"}, "nullable": true}
+						}
+					},
+					"genericPageError2": {
+						"properties": {
+							"items": {"elements": {"ref": "Error2"}, "nullable": true}
+						}
+					}
+				},
+				"properties": {
+					"A": {"ref": "genericPageError"},
+					"B": {"ref": "genericPageError2"}
+				}
 			}`,
 		},
 	}

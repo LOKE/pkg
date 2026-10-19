@@ -107,7 +107,8 @@ func indirect(t reflect.Type) reflect.Type {
 	return t
 }
 
-var typeArgIdent = regexp.MustCompile(`[\w./-]+`)
+// typeArgIdent matches each type in a generic argument list, capturing the identifier after any package path.
+var typeArgIdent = regexp.MustCompile(`(?:[\w./-]+\.)?(\w+)`)
 
 // typeName flattens generic instantiations into an identifier, e.g. Page[example.com/pkg.Item] -> PageItem.
 func typeName(t reflect.Type) string {
@@ -117,9 +118,8 @@ func typeName(t reflect.Type) string {
 	}
 	var sb strings.Builder
 	sb.WriteString(base)
-	for _, ident := range typeArgIdent.FindAllString(args, -1) {
-		ident = ident[strings.LastIndex(ident, ".")+1:]
-		sb.WriteString(strings.ToUpper(ident[:1]) + ident[1:])
+	for _, m := range typeArgIdent.FindAllStringSubmatch(args, -1) {
+		sb.WriteString(strings.ToUpper(m[1][:1]) + m[1][1:])
 	}
 	return sb.String()
 }
@@ -152,7 +152,7 @@ func TypeSchema(t reflect.Type, tdefs map[reflect.Type]*NamedSchema) *jtd.Schema
 			if name != "" {
 				tdefs[t] = &NamedSchema{
 					Name:    name,
-					SortKey: fmt.Sprintf("%s.%s", t.PkgPath(), name),
+					SortKey: fmt.Sprintf("%s.%s", t.PkgPath(), t.Name()),
 					Schema:  schema,
 				}
 			}
