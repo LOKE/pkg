@@ -3,6 +3,8 @@ package lokerpc
 import (
 	"encoding/json"
 	"flag"
+	"net/url"
+	"os/exec"
 	"reflect"
 	"testing"
 	"time"
@@ -20,6 +22,10 @@ type textMarshaler struct{}
 
 func (textMarshaler) MarshalText() ([]byte, error) {
 	return nil, nil
+}
+
+type genericPage[T any] struct {
+	Items []T `json:"items"`
 }
 
 func TestTypeSchema(t *testing.T) {
@@ -318,6 +324,70 @@ func TestTypeSchema(t *testing.T) {
 				},
 				"nullable": true,
 				"ref": "RecusiveStruct"
+			}`,
+		},
+		{
+			name: "generic type",
+			args: args{
+				t: reflect.TypeFor[genericPage[flag.Flag]](),
+			},
+			want: `{
+				"definitions": {
+					"Flag": {
+						"properties": {
+							"DefValue": {"type": "string"},
+							"Name": {"type": "string"},
+							"Usage": {"type": "string"},
+							"Value": {}
+						}
+					},
+					"genericPageFlag": {
+						"properties": {
+							"items": {"elements": {"ref": "Flag"}, "nullable": true}
+						}
+					}
+				},
+				"ref": "genericPageFlag"
+			}`,
+		},
+		{
+			name: "generic name collision",
+			args: args{
+				t: reflect.TypeOf(struct {
+					A genericPage[url.Error]
+					B genericPage[exec.Error]
+				}{}),
+			},
+			want: `{
+				"definitions": {
+					"Error": {
+						"properties": {
+							"Err": {},
+							"Op": {"type": "string"},
+							"URL": {"type": "string"}
+						}
+					},
+					"Error2": {
+						"properties": {
+							"Err": {},
+							"Name": {"type": "string"}
+						}
+					},
+					"genericPageError": {
+						"properties": {
+							"items": {"elements": {"ref": "Error"}, "nullable": true}
+						}
+					},
+					"genericPageError2": {
+						"properties": {
+							"items": {"elements": {"ref": "Error2"}, "nullable": true}
+						}
+					}
+				},
+				"properties": {
+					"A": {"ref": "genericPageError"},
+					"B": {"ref": "genericPageError2"}
+				}
 			}`,
 		},
 	}
