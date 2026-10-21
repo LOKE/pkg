@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package loke.rpc.test.v2;
+
+option go_package = "github.com/LOKE/pkg/lokerpc/v2/internal/testpb";
+
+import "google/protobuf/any.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+enum State {
+  STATE_UNSPECIFIED = 0;
+  STATE_READY = 1;
+}
+
+message Scalars {
+  message Nested {
+    string name = 1;
+  }
+
+  double double_value = 1;
+  float float_value = 2;
+  int32 int32_value = 3;
+  int64 int64_value = 4;
+  uint32 uint32_value = 5;
+  uint64 uint64_value = 6;
+  sint32 sint32_value = 7;
+  sint64 sint64_value = 8;
+  fixed32 fixed32_value = 9;
+  fixed64 fixed64_value = 10;
+  sfixed32 sfixed32_value = 11;
+  sfixed64 sfixed64_value = 12;
+  bool bool_value = 13;
+  string string_value = 14;
+  bytes bytes_value = 15;
+  State state = 16;
+  repeated string tags = 17;
+  map<string, Nested> entries = 18;
+  optional string optional_value = 19;
+  oneof choice {
+    string choice_text = 20;
+    Nested choice_nested = 21;
+  }
+  Nested nested = 22;
+  Left.Item left = 23;
+  Right.Item right = 24;
+  string renamed = 25 [json_name = "customName"];
+  google.protobuf.Timestamp timestamp = 26;
+  google.protobuf.Duration duration = 27;
+  google.protobuf.FieldMask field_mask = 28;
+  google.protobuf.Struct struct_value = 29;
+  google.protobuf.Value value = 30;
+  google.protobuf.ListValue list_value = 31;
+  google.protobuf.Any any_value = 32;
+  google.protobuf.Empty empty = 33;
+  google.protobuf.DoubleValue wrapped_double = 34;
+  google.protobuf.FloatValue wrapped_float = 35;
+  google.protobuf.Int64Value wrapped_int64 = 36;
+  google.protobuf.UInt64Value wrapped_uint64 = 37;
+  google.protobuf.Int32Value wrapped_int32 = 38;
+  google.protobuf.UInt32Value wrapped_uint32 = 39;
+  google.protobuf.BoolValue wrapped_bool = 40;
+  google.protobuf.StringValue wrapped_string = 41;
+  google.protobuf.BytesValue wrapped_bytes = 42;
+  repeated Nested children = 43;
+  map<int32, string> labels = 44;
+}
+
+message Left {
+  message Item {
+    string left_value = 1;
+  }
+}
+
+message Right {
+  message Item {
+    int32 right_value = 1;
+  }
+}
+
+// Fixture service documentation.
+service FixtureService {
+  // Echoes every supported field kind.
+  rpc Echo(Scalars) returns (Scalars);
+  rpc Ping(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc Expand(Scalars) returns (stream Scalars);
+  rpc Collect(stream Scalars) returns (Scalars);
+  rpc Chat(stream Scalars) returns (stream Scalars);
+}

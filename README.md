@@ -49,6 +49,44 @@ it** — ask first.
 If a package would only ever be useful inside LOKE and can't safely be public,
 it belongs in a private repo instead.
 
+## Migrating a service to `lokerpc/v2`
+
+Implement a proto-generated Connect service once, then replace the v1 mount call:
+
+```go
+import (
+    rpcv2 "github.com/LOKE/pkg/lokerpc/v2"
+)
+
+path, handler := examplev1connect.NewMenuServiceHandler(menu)
+err := rpcv2.MountHandlers(logger, mux, []rpcv2.Service{{
+    Name: "menu",
+    Path: path,
+    Handler: handler,
+}}, existingV1Service)
+if err != nil {
+    return err
+}
+```
+
+Here `menu` implements your generated handler interface and `existingV1Service`
+is a `*lokerpc.Service`; keep unchanged services in the same mount call. The
+required `Name` preserves the legacy service URL and must match
+`^[A-Za-z0-9][A-Za-z0-9_.-]*$`. The generated Connect path resolves its registered
+service descriptor automatically. Do not also call the v1 `MountHandlers` on
+this mux: v2 owns the merged `/rpc` metadata.
+
+Connect clients use the generated service path; existing clients keep using
+`POST /rpc/menu/<lowerCamelMethod>`. Unary methods are bridged in-process through
+the Connect handler, preserving its interceptors and options; streaming methods
+remain Connect-only. `GET /rpc` and `GET /rpc/menu` include legacy JTD metadata
+and the base64 descriptor set for proto-aware client generation. Duplicate
+service names return an error before anything is mounted.
+
+The bridge accepts identity and gzip request encoding; other encodings return
+415 `{"message":"Unsupported Content-Encoding"}`. Custom compression remains
+available on the native Connect routes.
+
 ## Licence
 
 [MIT](./LICENCE) © LOKE

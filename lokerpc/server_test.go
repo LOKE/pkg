@@ -2,6 +2,7 @@ package lokerpc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -110,6 +111,87 @@ func TestMountHandlers(t *testing.T) {
 				t.Errorf("want body %q, got %q", tt.wantBody, gotBody)
 			}
 		})
+	}
+}
+
+func TestServiceMeta(t *testing.T) {
+	type request struct {
+		Value string `json:"value"`
+	}
+	codec := MakeStandardEndpointCodec(func(_ context.Context, req request) (request, error) {
+		return req, nil
+	}, "Echo the value")
+	service := NewService("metadata", "Metadata test service", EndpointCodecMap{
+		"zebra": codec,
+		"alpha": codec,
+	})
+
+	meta := service.Meta()
+	if meta.ServiceName != service.Name || meta.Help != service.Help || meta.MultiArg {
+		t.Fatalf("Meta() service fields = %+v", meta)
+	}
+	if len(meta.Interfaces) != 2 {
+		t.Fatalf("Meta() interfaces = %v, want two interfaces", meta.Interfaces)
+	}
+	for i, method := range []string{"alpha", "zebra"} {
+		endpoint := meta.Interfaces[i]
+		if endpoint.MethodName != method {
+			t.Errorf("interface %d method = %q, want %q", i, endpoint.MethodName, method)
+		}
+		if endpoint.Help != codec.Help || endpoint.MethodTimeout != 60000 ||
+			!reflect.DeepEqual(endpoint.ParamNames, []string{"value"}) {
+			t.Errorf("interface %d metadata = %+v", i, endpoint)
+		}
+		if endpoint.RequestTypeDef == nil || endpoint.ResponseTypeDef == nil {
+			t.Errorf("interface %d is missing request or response schema", i)
+		}
+	}
+	if len(meta.Definitions) == 0 {
+		t.Error("Meta() is missing schema definitions")
+	}
+}
+
+func TestServiceMountHandlers(t *testing.T) {
+	service := NewService("standalone", "Standalone service", EndpointCodecMap{
+		"echo": MakeStandardEndpointCodec(func(_ context.Context, req struct{}) (string, error) {
+			return "echoed", nil
+		}, ""),
+	})
+	mux := http.NewServeMux()
+	service.MountHandlers(log.NewNopLogger(), mux)
+
+	root := httptest.NewRecorder()
+	mux.ServeHTTP(root, httptest.NewRequest(http.MethodGet, "/rpc", nil))
+	if root.Code != http.StatusNotFound {
+		t.Errorf("root status = %d, want 404", root.Code)
+	}
+
+	metadata := httptest.NewRecorder()
+	mux.ServeHTTP(metadata, httptest.NewRequest(http.MethodGet, "/rpc/standalone", nil))
+	if metadata.Code != http.StatusOK {
+		t.Fatalf("metadata status = %d, want 200", metadata.Code)
+	}
+	if got := metadata.Header().Get("Content-Type"); got != ContentType {
+		t.Errorf("metadata content type = %q, want %q", got, ContentType)
+	}
+	wantMeta, err := json.Marshal(service.Meta())
+	if err != nil {
+		t.Fatalf("encode metadata: %v", err)
+	}
+	if got := strings.TrimSpace(metadata.Body.String()); got != string(wantMeta) {
+		t.Errorf("served metadata = %s, want %s", got, wantMeta)
+	}
+
+	rejected := httptest.NewRecorder()
+	mux.ServeHTTP(rejected, httptest.NewRequest(http.MethodPost, "/rpc/standalone", nil))
+	if rejected.Code != http.StatusMethodNotAllowed {
+		t.Errorf("metadata POST status = %d, want 405", rejected.Code)
+	}
+
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/rpc/standalone/echo", strings.NewReader(`{}`)))
+	if response.Code != http.StatusOK || response.Body.String() != "\"echoed\"\n" {
+		t.Errorf("method response = %d %q, want 200 echoed", response.Code, response.Body.String())
 	}
 }
 

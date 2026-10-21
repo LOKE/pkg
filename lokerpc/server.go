@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/LOKE/pkg/errors"
 	"github.com/go-kit/log"
@@ -257,68 +259,82 @@ type Mux interface {
 	Handle(pattern string, handler http.Handler)
 }
 
-// MountHandlers mounts all the service endpoints onto the mux
+// Meta returns the service metadata with interfaces sorted by method name.
+func (s *Service) Meta() Meta {
+	defs := map[reflect.Type]*NamedSchema{}
+	meta := Meta{
+		ServiceName: s.Name,
+		MultiArg:    false,
+		Help:        s.Help,
+	}
+
+	methodNames := make([]string, 0, len(s.endpointCodecs))
+	for methodName := range s.endpointCodecs {
+		methodNames = append(methodNames, methodName)
+	}
+	sort.Strings(methodNames)
+
+	for _, methodName := range methodNames {
+		ec := s.endpointCodecs[methodName]
+		endMeta := EndpointMeta{
+			MethodName:    methodName,
+			MethodTimeout: 60000,
+			Help:          ec.Help,
+			ParamNames:    ec.ParamNames,
+		}
+
+		if ec.requestType != nil {
+			endMeta.RequestTypeDef = TypeSchema(ec.requestType, defs)
+			endMeta.RequestTypeDef.Nullable = false
+		}
+		if ec.voidResponse {
+			endMeta.ResponseTypeDef = &jtd.Schema{
+				Metadata: map[string]any{"void": true},
+			}
+		} else if ec.responseType != nil {
+			endMeta.ResponseTypeDef = TypeSchema(ec.responseType, defs)
+			if ec.errOnNilResponse {
+				endMeta.ResponseTypeDef.Nullable = false
+			}
+		}
+
+		meta.Interfaces = append(meta.Interfaces, endMeta)
+	}
+
+	meta.Definitions = TypeDefs(defs)
+	return meta
+}
+
+// MountHandlers mounts the service's method routes and GET /rpc/<service>
+// metadata endpoint without mounting the GET /rpc root metadata endpoint.
+func (s *Service) MountHandlers(logger log.Logger, mux Mux) {
+	s.mountHandlers(logger, mux, s.Meta())
+}
+
+func (s *Service) mountHandlers(logger log.Logger, mux Mux, meta Meta) {
+	for methodName, ec := range wrapMetrics(s.Name, s.endpointCodecs) {
+		l := log.With(logger, "rpc_service", s.Name, "method", methodName)
+		mux.Handle("/rpc/"+s.Name+"/"+methodName, makeHandler(l, ec))
+	}
+	mux.Handle("/rpc/"+s.Name, newMetaHandler(meta))
+}
+
+// MountHandlers mounts all the service endpoints onto the mux.
 // Endpoints are mounted at
 //
 //	POST /rpc/<service>/<method>
 //
-// Meta data is serviced from
+// Metadata is served from
 //
 //	GET /rpc
 //	GET /rpc/<service>
 func MountHandlers(logger log.Logger, mux Mux, services ...*Service) {
 	rootmeta := RootMeta{}
-
 	for _, service := range services {
-		ecm := wrapMetrics(service.Name, service.endpointCodecs)
-
-		defs := map[reflect.Type]*NamedSchema{}
-
-		meta := &Meta{
-			ServiceName: service.Name,
-			MultiArg:    false,
-			Help:        service.Help,
-		}
-
-		for methodName, ec := range ecm {
-			l := log.With(logger, "rpc_service", service.Name, "method", methodName)
-
-			mux.Handle("/rpc/"+service.Name+"/"+methodName, makeHandler(l, ec))
-
-			endMeta := EndpointMeta{
-				MethodName:    methodName,
-				MethodTimeout: 60000,
-				Help:          ec.Help,
-				ParamNames:    ec.ParamNames,
-			}
-
-			if ec.requestType != nil {
-				endMeta.RequestTypeDef = TypeSchema(ec.requestType, defs)
-				endMeta.RequestTypeDef.Nullable = false
-			}
-			if ec.voidResponse {
-				endMeta.ResponseTypeDef = &jtd.Schema{
-					Metadata: map[string]any{"void": true},
-				}
-			} else if ec.responseType != nil {
-				endMeta.ResponseTypeDef = TypeSchema(ec.responseType, defs)
-				if ec.errOnNilResponse {
-					endMeta.ResponseTypeDef.Nullable = false
-				}
-			}
-
-			meta.Interfaces = append(meta.Interfaces, endMeta)
-		}
-
-		meta.Definitions = TypeDefs(defs)
-
-		// service meta endpoint
-		mux.Handle("/rpc/"+service.Name, newMetaHandler(meta))
-
-		rootmeta.Services = append(rootmeta.Services, meta)
+		meta := service.Meta()
+		service.mountHandlers(logger, mux, meta)
+		rootmeta.Services = append(rootmeta.Services, &meta)
 	}
-
-	// root meta endpoint
 	mux.Handle("/rpc", newMetaHandler(rootmeta))
 }
 
@@ -387,20 +403,19 @@ func wrapMetrics(serviceName string, ecm EndpointCodecMap) EndpointCodecMap {
 }
 
 func wrapEndpoint(handlerName string, e Endpoint) Endpoint {
-	c := count.WithLabelValues(handlerName)
-	l := latency.WithLabelValues(handlerName)
+	observe := NewRequestObserver(handlerName)
 
 	return func(ctx context.Context, request interface{}) (result interface{}, err error) {
-		t := prometheus.NewTimer(l)
-		defer t.ObserveDuration()
+		start := time.Now()
 		defer func() {
+			failureType := ""
 			if err != nil {
-				failures.WithLabelValues(handlerName, "unknown").Inc()
+				failureType = "unknown"
 			} else if e, ok := result.(Failer); ok && e.Failed() != nil {
-				failures.WithLabelValues(handlerName, "unknown").Inc()
+				failureType = "unknown"
 			}
+			observe(failureType, time.Since(start))
 		}()
-		c.Inc()
 		return e(ctx, request)
 	}
 }

@@ -3,12 +3,14 @@ module github.com/LOKE/pkg
 go 1.26
 
 require (
+	connectrpc.com/connect v1.19.1
 	github.com/Unleash/unleash-go-sdk/v5 v5.0.3
 	github.com/go-kit/log v0.2.1
-	github.com/google/go-cmp v0.5.8
+	github.com/google/go-cmp v0.7.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/jsontypedef/json-typedef-go v0.0.0-20200503043955-4280071bd745
 	github.com/prometheus/client_golang v1.12.2
+	google.golang.org/protobuf v1.36.11
 )
 
 require (
@@ -33,7 +35,6 @@ require (
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.26.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
-	google.golang.org/protobuf v1.28.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
