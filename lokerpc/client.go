@@ -63,6 +63,10 @@ func (e *rpcClientError) ErrorType() string {
 	return e.Type
 }
 
+func (e *rpcClientError) ErrorNamespace() string {
+	return e.Namespace
+}
+
 func (e *rpcClientError) ErrorCode() string {
 	return e.Code
 }

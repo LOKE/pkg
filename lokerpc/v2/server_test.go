@@ -44,11 +44,11 @@ func (fixtureHandler) Ping(context.Context, *connect.Request[emptypb.Empty]) (*c
 }
 
 func fixtureService(name string, handler fixtureHandler, opts ...connect.HandlerOption) v2.Service {
-	path, httpHandler := testpbconnect.NewFixtureServiceHandler(handler, opts...)
 	return v2.Service{
-		Name:    name,
-		Path:    path,
-		Handler: httpHandler,
+		Name: name,
+		Handler: func(extra ...connect.HandlerOption) (string, http.Handler) {
+			return testpbconnect.NewFixtureServiceHandler(handler, append(append([]connect.HandlerOption{}, extra...), opts...)...)
+		},
 	}
 }
 
@@ -381,6 +381,126 @@ func TestMergedMetadataAndLegacyDispatch(t *testing.T) {
 	}
 }
 
+func TestPairedMetadataAndDispatch(t *testing.T) {
+	codec := v1.MakeStandardEndpointCodec(func(_ context.Context, request struct {
+		Value string `json:"value"`
+	}) (string, error) {
+		if request.Value == "fail" {
+			return "", errors.New("legacy failure")
+		}
+		return "legacy " + request.Value, nil
+	}, "legacy echo")
+	legacy := v1.NewService("fixture", "original help", v1.EndpointCodecMap{"echo": codec})
+	service := fixtureService("fixture", fixtureHandler{})
+	service.NoBridge = true
+	others := []*v1.Service{v1.NewService("zeta", "last", nil), legacy, v1.NewService("alpha", "first", nil)}
+	mux := mountFixture(t, service, others...)
+	baseline := http.NewServeMux()
+	for _, original := range others {
+		original.MountHandlers(log.NewNopLogger(), baseline)
+	}
+
+	for _, path := range []string{"/rpc", "/rpc/fixture"} {
+		t.Run(path, func(t *testing.T) {
+			response := serve(t, mux, http.MethodGet, path, "")
+			if response.Code != http.StatusOK {
+				t.Fatalf("metadata status = %d", response.Code)
+			}
+			meta := decodeObject(t, response)
+			if path == "/rpc" {
+				services := meta["services"].([]any)
+				if len(services) != 3 {
+					t.Fatalf("root contains %d services, want 3", len(services))
+				}
+				for i, name := range []string{"alpha", "fixture", "zeta"} {
+					entry := services[i].(map[string]any)
+					if entry["serviceName"] != name {
+						t.Fatalf("root service %d = %v, want %q", i, entry["serviceName"], name)
+					}
+					if name != "fixture" {
+						want := decodeObject(t, serve(t, baseline, http.MethodGet, "/rpc/"+name, ""))
+						if !reflect.DeepEqual(entry, want) {
+							t.Errorf("unpaired legacy metadata changed: got %#v, want %#v", entry, want)
+						}
+					}
+				}
+				meta = services[1].(map[string]any)
+			}
+			protoMeta := decodeObject(t, serve(t, mountFixture(t, fixtureService("fixture", fixtureHandler{})), http.MethodGet, "/rpc/fixture", ""))
+			for _, field := range []string{"proto", "protoService"} {
+				if meta[field] != protoMeta[field] {
+					t.Errorf("%s differs from proto metadata", field)
+				}
+				delete(meta, field)
+			}
+			want := decodeObject(t, serve(t, baseline, http.MethodGet, "/rpc/fixture", ""))
+			if !reflect.DeepEqual(meta, want) {
+				t.Errorf("legacy metadata changed: got %#v, want %#v", meta, want)
+			}
+		})
+	}
+	for _, test := range []struct {
+		method, path, body string
+	}{
+		{http.MethodPost, "/rpc/fixture/echo", `{"value":"ok","unknown":true}`},
+		{http.MethodPost, "/rpc/fixture/echo", `{"value":"fail"}`},
+		{http.MethodPost, "/rpc/fixture/echo", "{"},
+		{http.MethodPost, "/rpc/fixture/ping", "{}"},
+		{http.MethodGet, "/rpc/fixture/echo", ""},
+	} {
+		t.Run(test.method+test.path+test.body, func(t *testing.T) {
+			got := serve(t, mux, test.method, test.path, test.body)
+			want := serve(t, baseline, test.method, test.path, test.body)
+			if got.Code != want.Code || got.Body.String() != want.Body.String() || !reflect.DeepEqual(got.Header(), want.Header()) {
+				t.Errorf("paired legacy response = %d %v %q, want %d %v %q", got.Code, got.Header(), got.Body.String(), want.Code, want.Header(), want.Body.String())
+			}
+		})
+	}
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client := testpbconnect.NewFixtureServiceClient(server.Client(), server.URL)
+	response, err := client.Echo(context.Background(), connect.NewRequest(&testpb.Scalars{StringValue: "connect"}))
+	if err != nil {
+		t.Fatalf("Connect Echo: %v", err)
+	}
+	if response.Msg.StringValue != "connect" {
+		t.Errorf("Connect response = %q", response.Msg.StringValue)
+	}
+}
+
+func TestNoBridgeWithoutLegacy(t *testing.T) {
+	service := fixtureService("fixture", fixtureHandler{})
+	service.NoBridge = true
+	recorded := &recordingMux{}
+	if err := v2.MountHandlers(log.NewNopLogger(), recorded, []v2.Service{service}); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range recorded.paths {
+		if strings.HasPrefix(path, "/rpc/fixture/") {
+			t.Errorf("NoBridge mounted legacy method route %q", path)
+		}
+	}
+	mux := mountFixture(t, service)
+	bridged := mountFixture(t, fixtureService("fixture", fixtureHandler{}))
+	for _, path := range []string{"/rpc", "/rpc/fixture"} {
+		got := serve(t, mux, http.MethodGet, path, "")
+		want := serve(t, bridged, http.MethodGet, path, "")
+		if got.Code != want.Code || got.Body.String() != want.Body.String() {
+			t.Errorf("%s metadata differs with NoBridge", path)
+		}
+	}
+	if response := serve(t, mux, http.MethodPost, "/rpc/fixture/echo", "{}"); response.Code != http.StatusNotFound {
+		t.Errorf("disabled bridge status = %d, want 404", response.Code)
+	}
+	request := httptest.NewRequest(http.MethodPost, testpbconnect.FixtureServiceEchoProcedure, strings.NewReader(`{"stringValue":"connect"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || decodeObject(t, response)["stringValue"] != "connect" {
+		t.Errorf("standalone Connect = %d %s", response.Code, response.Body.String())
+	}
+}
+
 type recordingMux struct{ paths []string }
 
 func (mux *recordingMux) Handle(path string, _ http.Handler) {
@@ -390,22 +510,42 @@ func (mux *recordingMux) Handle(path string, _ http.Handler) {
 func TestMountValidationIsAtomic(t *testing.T) {
 	valid := fixtureService("fixture", fixtureHandler{})
 	legacy := v1.NewService("legacy", "", nil)
+	noBridge := valid
+	noBridge.NoBridge = true
+	pairedLegacy := v1.NewService("fixture", "", nil)
+	validPath, validHandler := valid.Handler()
+	withPath := func(path string) v2.Service {
+		return v2.Service{Name: "bad", Handler: func(...connect.HandlerOption) (string, http.Handler) {
+			return path, validHandler
+		}}
+	}
 	for _, test := range []struct {
-		name     string
-		services []v2.Service
-		legacy   []*v1.Service
+		name      string
+		services  []v2.Service
+		legacy    []*v1.Service
+		wantError string
 	}{
-		{name: "duplicate proto", services: []v2.Service{valid, valid}},
-		{name: "duplicate legacy", services: []v2.Service{valid}, legacy: []*v1.Service{legacy, legacy}},
-		{name: "mixed duplicate", services: []v2.Service{valid}, legacy: []*v1.Service{v1.NewService("fixture", "", nil)}},
+		{name: "duplicate proto", services: []v2.Service{valid, valid}, wantError: "duplicate legacy service name"},
+		{name: "duplicate legacy", services: []v2.Service{valid}, legacy: []*v1.Service{legacy, legacy}, wantError: "duplicate legacy service name"},
+		{name: "mixed duplicate", services: []v2.Service{valid}, legacy: []*v1.Service{v1.NewService("fixture", "", nil)}, wantError: "duplicate legacy service name"},
+		{name: "duplicate unpaired no bridge", services: []v2.Service{noBridge, noBridge}, wantError: "duplicate legacy service name"},
+		{name: "duplicate paired no bridge", services: []v2.Service{noBridge, noBridge}, legacy: []*v1.Service{pairedLegacy}, wantError: "duplicate legacy service name"},
+		{name: "duplicate legacy with pair", services: []v2.Service{noBridge}, legacy: []*v1.Service{pairedLegacy, pairedLegacy}, wantError: "duplicate legacy service name"},
+		{name: "bridge then no bridge", services: []v2.Service{valid, noBridge}, wantError: "duplicate legacy service name"},
+		{name: "no bridge then bridge", services: []v2.Service{noBridge, valid}, wantError: "duplicate legacy service name"},
+		{name: "paired bridge then no bridge", services: []v2.Service{valid, noBridge}, legacy: []*v1.Service{pairedLegacy}, wantError: "duplicate legacy service name"},
+		{name: "paired no bridge then bridge", services: []v2.Service{noBridge, valid}, legacy: []*v1.Service{pairedLegacy}, wantError: "duplicate legacy service name"},
 		{name: "nil legacy", services: []v2.Service{valid}, legacy: []*v1.Service{nil}},
-		{name: "unregistered service", services: []v2.Service{{Name: "bad", Path: "/unregistered.FixtureService/", Handler: valid.Handler}}},
-		{name: "message instead of service", services: []v2.Service{{Name: "bad", Path: "/loke.rpc.test.v2.Scalars/", Handler: valid.Handler}}},
-		{name: "missing handler", services: []v2.Service{{Name: "bad", Path: valid.Path}}},
-		{name: "missing path", services: []v2.Service{{Name: "bad", Handler: valid.Handler}}},
-		{name: "missing leading slash", services: []v2.Service{{Name: "bad", Path: strings.TrimPrefix(valid.Path, "/"), Handler: valid.Handler}}},
-		{name: "missing trailing slash", services: []v2.Service{{Name: "bad", Path: strings.TrimSuffix(valid.Path, "/"), Handler: valid.Handler}}},
-		{name: "method path", services: []v2.Service{{Name: "bad", Path: valid.Path + "Echo", Handler: valid.Handler}}},
+		{name: "unregistered service", services: []v2.Service{withPath("/unregistered.FixtureService/")}},
+		{name: "message instead of service", services: []v2.Service{withPath("/loke.rpc.test.v2.Scalars/")}},
+		{name: "missing factory", services: []v2.Service{{Name: "bad"}}},
+		{name: "missing handler", services: []v2.Service{{Name: "bad", Handler: func(...connect.HandlerOption) (string, http.Handler) {
+			return validPath, nil
+		}}}},
+		{name: "missing path", services: []v2.Service{withPath("")}},
+		{name: "missing leading slash", services: []v2.Service{withPath(strings.TrimPrefix(validPath, "/"))}},
+		{name: "missing trailing slash", services: []v2.Service{withPath(strings.TrimSuffix(validPath, "/"))}},
+		{name: "method path", services: []v2.Service{withPath(validPath + "Echo")}},
 		{name: "empty name", services: []v2.Service{fixtureService("", fixtureHandler{})}},
 		{name: "slash name", services: []v2.Service{fixtureService("bad/name", fixtureHandler{})}},
 		{name: "query name", services: []v2.Service{fixtureService("bad?name", fixtureHandler{})}},
@@ -420,6 +560,8 @@ func TestMountValidationIsAtomic(t *testing.T) {
 			mux := &recordingMux{}
 			if err := v2.MountHandlers(log.NewNopLogger(), mux, test.services, test.legacy...); err == nil {
 				t.Error("MountHandlers() succeeded, want validation error")
+			} else if !strings.Contains(err.Error(), test.wantError) {
+				t.Errorf("MountHandlers() error = %v, want %q", err, test.wantError)
 			}
 			if len(mux.paths) != 0 {
 				t.Errorf("failed mount registered routes %v", mux.paths)

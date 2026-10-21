@@ -51,18 +51,23 @@ it belongs in a private repo instead.
 
 ## Migrating a service to `lokerpc/v2`
 
-Implement a proto-generated Connect service once, then replace the v1 mount call:
+For existing services, use paired mode: retain the v1 service unchanged and add
+a separate proto-generated Connect implementation calling the same domain service.
+Replace the v1 mount call with one v2 mount call:
 
 ```go
 import (
+    "net/http"
+    "connectrpc.com/connect"
     rpcv2 "github.com/LOKE/pkg/lokerpc/v2"
 )
 
-path, handler := examplev1connect.NewMenuServiceHandler(menu)
 err := rpcv2.MountHandlers(logger, mux, []rpcv2.Service{{
     Name: "menu",
-    Path: path,
-    Handler: handler,
+    Handler: func(options ...connect.HandlerOption) (string, http.Handler) {
+        return examplev1connect.NewMenuServiceHandler(menu, options...)
+    },
+    NoBridge: true,
 }}, existingV1Service)
 if err != nil {
     return err
@@ -70,22 +75,58 @@ if err != nil {
 ```
 
 Here `menu` implements your generated handler interface and `existingV1Service`
-is a `*lokerpc.Service`; keep unchanged services in the same mount call. The
-required `Name` preserves the legacy service URL and must match
-`^[A-Za-z0-9][A-Za-z0-9_.-]*$`. The generated Connect path resolves its registered
-service descriptor automatically. Do not also call the v1 `MountHandlers` on
-this mux: v2 owns the merged `/rpc` metadata.
+is the original `*lokerpc.Service` named `"menu"`. `NoBridge: true` leaves all
+`POST /rpc/menu/<method>` routes, validation, responses and errors with that v1
+service. Connect clients use the generated service path. `GET /rpc` and
+`GET /rpc/menu` retain the original legacy metadata and add only `proto` and
+`protoService`, so legacy client generation remains unchanged while proto-aware
+clients can generate Connect clients.
 
-Connect clients use the generated service path; existing clients keep using
-`POST /rpc/menu/<lowerCamelMethod>`. Unary methods are bridged in-process through
-the Connect handler, preserving its interceptors and options; streaming methods
-remain Connect-only. `GET /rpc` and `GET /rpc/menu` include legacy JTD metadata
-and the base64 descriptor set for proto-aware client generation. Duplicate
-service names return an error before anything is mounted.
+Exactly one v1 service and one `NoBridge` proto service may share a name; all
+other duplicate names are mount errors. A `NoBridge` service without a v1 pair
+is also allowed: its metadata comes from the proto and it has no legacy method
+routes. Keep other unchanged v1 services in the same mount call. The required
+`Name` must match `^[A-Za-z0-9][A-Za-z0-9_.-]*$`. The generated Connect path resolves
+its registered service descriptor automatically. Do not also call the v1
+`MountHandlers` on this mux: v2 owns the merged `/rpc` metadata.
+
+For new services without legacy callers, omit `NoBridge` to enable the bridge.
+Unary methods then serve `POST /rpc/<name>/<lowerCamelMethod>` in-process through
+the Connect handler, preserving its interceptors and options. Metadata is derived
+from the proto, not a historical v1 schema; streaming methods remain Connect-only.
+The bridge is not a drop-in replacement for an existing service's wire contract.
 
 The bridge accepts identity and gzip request encoding; other encodings return
 415 `{"message":"Unsupported Content-Encoding"}`. Custom compression remains
 available on the native Connect routes.
+
+`MountHandlers` builds each proto handler with an automatic standard error-detail
+interceptor; prepend the supplied options before any service-specific handler options.
+Errors implementing `ErrorCode() string`, including wrapped causes, receive one
+`loke.rpc.v1.Error` detail. Existing details and Connect status codes are preserved;
+ordinary coded errors use Connect's `unknown` code. Optional `Public() bool`,
+`ErrorID() string`, `ErrorType() string`, `ErrorNamespace() string`, `ErrorHelp() string`,
+and `ErrorMeta() map[string]any` populate the remaining fields from the same coded
+cause. JSON-compatible typed collections and structs are normalized; unencodable
+metadata values are omitted without changing the error's status or identity.
+Reserved error fields (`message`, `instance`, `expose`, `code`, `namespace`, `type`,
+`help`, `name`, `stack`) are excluded from newly extracted metadata and stripped
+when rendering bridge metadata, including existing details. Metadata cannot override
+the error's identity. Errors without a machine code receive no detail.
+
+Clients can call `detail, ok := rpcv1.FromError(err)` by importing only
+`github.com/LOKE/pkg/lokerpc/v2/rpcv1`. This dependency-light package does not import
+the RPC server or register its metrics. The bridge renders errors
+with this detail as HTTP 400 in canonical BaseError order: `message`, `instance`,
+`expose` (only when true), `code`, `namespace` (only when nonempty), `type` (falling
+back to code), then flattened metadata. Named metadata keys are sorted in JavaScript
+UTF-16 order; integer-index keys come first in numeric order at every object level.
+`help` is omitted. Without a detail, existing Connect-to-legacy error mapping applies.
+Paired v1 routes are unchanged.
+
+The canonical schema is `lokerpc/v2/proto/loke/rpc/v1/error.proto`. Regenerate its Go
+types with `go generate ./lokerpc/v2` (requires `protoc`); the checked-in plugin wrapper
+uses `go run google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11`.
 
 ## Licence
 

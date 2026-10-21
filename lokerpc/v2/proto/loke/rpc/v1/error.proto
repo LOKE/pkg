@@ -1,0 +1,13 @@
+syntax = "proto3";
+package loke.rpc.v1;
+import "google/protobuf/struct.proto";
+// Error carries the LOKE error identity alongside a Connect status code.
+message Error {
+  string code = 1;       // machine code, e.g. "product_not_found"
+  string namespace = 2;  // e.g. "menu"
+  string type = 3;       // @loke/errors type URL, or the code when there is none
+  string instance = 4;   // per-occurrence id (@loke/errors ULID)
+  bool expose = 5;       // safe to show the message to end users
+  string help = 6;
+  google.protobuf.Struct meta = 7; // service-specific fields, e.g. {"productId": "p1"}
+}

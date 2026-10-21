@@ -1,6 +1,8 @@
 // Package lokerpc serves protobuf services through Connect and legacy HTTP RPC.
 package lokerpc
 
+//go:generate protoc -I proto --plugin=protoc-gen-go=./protoc-gen-go.sh --go_out=. --go_opt=module=github.com/LOKE/pkg/lokerpc/v2 --go_opt=Mloke/rpc/v1/error.proto=github.com/LOKE/pkg/lokerpc/v2/rpcv1 proto/loke/rpc/v1/error.proto
+
 import (
 	"bytes"
 	"compress/gzip"
@@ -31,46 +33,48 @@ type Meta struct {
 	ProtoService string `json:"protoService,omitempty"`
 }
 
-// Service mounts a generated Connect handler under a required legacy Name.
+// Service builds a generated Connect handler under a required legacy Name.
 type Service struct {
-	Name    string
-	Path    string
-	Handler http.Handler
+	Name string
+	// Handler must prepend the supplied options before service-specific options.
+	Handler func(...connect.HandlerOption) (string, http.Handler)
+	// NoBridge disables legacy method routes so a same-name v1 service can keep them.
+	NoBridge bool
 }
 
-// MountHandlers mounts Connect paths, /rpc/<name>/<method>, and GET /rpc[/<name>] metadata.
+// MountHandlers mounts Connect, metadata, and bridges unless NoBridge is set.
+// Only a NoBridge proto service and one v1 service may share a name.
 func MountHandlers(logger log.Logger, mux v1.Mux, services []Service, legacy ...*v1.Service) error {
-	names := make(map[string]bool)
+	legacyIndexes, protoNames, err := validateServiceNames(services, legacy)
+	if err != nil {
+		return err
+	}
 	paths := make(map[string]bool)
 	descriptors := make([]protoreflect.ServiceDescriptor, len(services))
-	for _, service := range legacy {
-		if service == nil {
-			return fmt.Errorf("nil legacy service")
-		}
-		if err := reserveName(names, service.Name); err != nil {
-			return err
-		}
-	}
+	handlers := make([]http.Handler, len(services))
+	servicePaths := make([]string, len(services))
 	for i, service := range services {
-		if err := reserveName(names, service.Name); err != nil {
-			return err
-		}
 		if service.Handler == nil {
 			return fmt.Errorf("service %q requires a handler", service.Name)
 		}
-		descriptor, err := protoregistry.GlobalFiles.FindDescriptorByName(protoreflect.FullName(strings.Trim(service.Path, "/")))
+		path, handler := service.Handler(connect.WithInterceptors(errorInterceptor{}))
+		if handler == nil {
+			return fmt.Errorf("service %q requires a handler", service.Name)
+		}
+		servicePaths[i], handlers[i] = path, handler
+		descriptor, err := protoregistry.GlobalFiles.FindDescriptorByName(protoreflect.FullName(strings.Trim(path, "/")))
 		if err != nil {
 			return fmt.Errorf("resolve service %q: %w", service.Name, err)
 		}
 		serviceDescriptor, ok := descriptor.(protoreflect.ServiceDescriptor)
-		if !ok || service.Path != "/"+string(serviceDescriptor.FullName())+"/" {
-			return fmt.Errorf("service %q has invalid Connect path %q", service.Name, service.Path)
+		if !ok || path != "/"+string(serviceDescriptor.FullName())+"/" {
+			return fmt.Errorf("service %q has invalid Connect path %q", service.Name, path)
 		}
 		descriptors[i] = serviceDescriptor
-		if paths[service.Path] {
-			return fmt.Errorf("duplicate Connect path %q", service.Path)
+		if paths[path] {
+			return fmt.Errorf("duplicate Connect path %q", path)
 		}
-		paths[service.Path] = true
+		paths[path] = true
 	}
 	root := struct {
 		Services []Meta `json:"services"`
@@ -84,7 +88,12 @@ func MountHandlers(logger log.Logger, mux v1.Mux, services []Service, legacy ...
 		if err != nil {
 			return fmt.Errorf("service %q metadata: %w", service.Name, err)
 		}
-		root.Services = append(root.Services, meta)
+		if index, paired := legacyIndexes[service.Name]; paired {
+			meta.Meta = root.Services[index].Meta
+			root.Services[index] = meta
+		} else {
+			root.Services = append(root.Services, meta)
+		}
 		metadata[i], err = metaHandler(meta)
 		if err != nil {
 			return fmt.Errorf("encode service metadata: %w", err)
@@ -96,15 +105,57 @@ func MountHandlers(logger log.Logger, mux v1.Mux, services []Service, legacy ...
 		return fmt.Errorf("encode root metadata: %w", err)
 	}
 	for _, service := range legacy {
-		service.MountHandlers(logger, mux)
+		if protoNames[service.Name] {
+			service.MountHandlers(logger, methodMux{Mux: mux, metadataPath: "/rpc/" + service.Name})
+		} else {
+			service.MountHandlers(logger, mux)
+		}
 	}
 	for i, service := range services {
-		mux.Handle(service.Path, service.Handler)
-		mux.Handle("/rpc/"+service.Name+"/", bridge(logger, service, descriptors[i]))
+		mux.Handle(servicePaths[i], handlers[i])
+		if !service.NoBridge {
+			mux.Handle("/rpc/"+service.Name+"/", bridge(logger, service.Name, servicePaths[i], handlers[i], descriptors[i]))
+		}
 		mux.Handle("/rpc/"+service.Name, metadata[i])
 	}
 	mux.Handle("/rpc", rootHandler)
 	return nil
+}
+
+type methodMux struct {
+	v1.Mux
+	metadataPath string
+}
+
+// Only paired metadata is replaced; v1 retains ownership of its method handlers.
+func (mux methodMux) Handle(path string, handler http.Handler) {
+	if path != mux.metadataPath {
+		mux.Mux.Handle(path, handler)
+	}
+}
+
+func validateServiceNames(services []Service, legacy []*v1.Service) (map[string]int, map[string]bool, error) {
+	names := make(map[string]bool)
+	protoNames := make(map[string]bool)
+	legacyIndexes := make(map[string]int)
+	for i, service := range legacy {
+		if service == nil {
+			return nil, nil, fmt.Errorf("nil legacy service")
+		}
+		if err := reserveName(names, service.Name); err != nil {
+			return nil, nil, err
+		}
+		legacyIndexes[service.Name] = i
+	}
+	for _, service := range services {
+		if err := reserveName(protoNames, service.Name); err != nil {
+			return nil, nil, err
+		}
+		if names[service.Name] && !service.NoBridge {
+			return nil, nil, fmt.Errorf("duplicate legacy service name %q", service.Name)
+		}
+	}
+	return legacyIndexes, protoNames, nil
 }
 
 func reserveName(names map[string]bool, name string) error {
@@ -155,8 +206,8 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-func bridge(logger log.Logger, service Service, descriptor protoreflect.ServiceDescriptor) http.Handler {
-	logger = log.With(logger, "rpc_service", service.Name)
+func bridge(logger log.Logger, serviceName, servicePath string, handler http.Handler, descriptor protoreflect.ServiceDescriptor) http.Handler {
+	logger = log.With(logger, "rpc_service", serviceName)
 	methods := make(map[string]protoreflect.MethodDescriptor)
 	observers := make(map[string]func(string, time.Duration))
 	for i := range descriptor.Methods().Len() {
@@ -164,10 +215,10 @@ func bridge(logger log.Logger, service Service, descriptor protoreflect.ServiceD
 		if !method.IsStreamingClient() && !method.IsStreamingServer() {
 			name := protoMethodName(string(method.Name()))
 			methods[name] = method
-			observers[name] = v1.NewRequestObserver(service.Name + "." + name)
+			observers[name] = v1.NewRequestObserver(serviceName + "." + name)
 		}
 	}
-	prefix := "/rpc/" + service.Name + "/"
+	prefix := "/rpc/" + serviceName + "/"
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeJSON(w, http.StatusMethodNotAllowed, errorBody{Message: "Method Not Allowed"})
@@ -213,7 +264,7 @@ func bridge(logger log.Logger, service Service, descriptor protoreflect.ServiceD
 			body = []byte("{}")
 		}
 		forward := r.Clone(ctx)
-		forward.URL.Path = service.Path + string(method.Name())
+		forward.URL.Path = servicePath + string(method.Name())
 		forward.URL.RawPath = ""
 		forward.Body = io.NopCloser(bytes.NewReader(body))
 		forward.ContentLength = int64(len(body))
@@ -221,7 +272,7 @@ func bridge(logger log.Logger, service Service, descriptor protoreflect.ServiceD
 		forward.Header.Set("Connect-Protocol-Version", "1")
 		forward.Header.Set("Accept-Encoding", "identity")
 		response := newBufferedResponse()
-		service.Handler.ServeHTTP(response, forward)
+		handler.ServeHTTP(response, forward)
 		responseBody, err := decodeBody(response.body.Bytes(), response.header.Get("Content-Encoding"))
 		if err != nil {
 			failure, failureMessage = "internal", err.Error()
@@ -237,12 +288,24 @@ func bridge(logger log.Logger, service Service, descriptor protoreflect.ServiceD
 			var wire struct {
 				Code    string `json:"code"`
 				Message string `json:"message"`
+				Details []struct {
+					Type  string `json:"type"`
+					Value string `json:"value"`
+				} `json:"details"`
 			}
 			if err := json.Unmarshal(responseBody, &wire); err != nil {
 				wire.Message = http.StatusText(response.status)
 			}
 			failure = wire.Code
 			failureMessage = wire.Message
+			for _, detail := range wire.Details {
+				if detail.Type == errorDetailType {
+					if value, ok := decodeErrorDetail(detail.Value); ok {
+						writeLegacyError(w, wire.Message, value)
+						return
+					}
+				}
+			}
 			if wire.Code == connect.CodeInvalidArgument.String() {
 				// Connect has enforced its decompressed size limit before this validation.
 				decoded, err := decodeBody(body, encoding)
