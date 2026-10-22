@@ -100,8 +100,23 @@ The bridge accepts identity and gzip request encoding; other encodings return
 415 `{"message":"Unsupported Content-Encoding"}`. Custom compression remains
 available on the native Connect routes.
 
+The bridge uses a dedicated `loke-legacy-json` codec to write default-valued
+protobuf JSON directly into Connect's reusable response buffer, avoiding a
+dynamic-message decode and second encode. Field names are cached per descriptor;
+maps remain sorted and protobuf JSON scalar formatting is preserved. Well-known
+types and proto2 messages use `protojson` for their specialized semantics. Requests
+retain `protojson` validation and unknown-field handling, with a fast path for
+empty ordinary messages. Native Connect JSON, handler options and compression
+behavior are unchanged; the bridge codec is not exposed on native Connect routes.
+As in the TypeScript bridge, send-size limits apply to the default-filled JSON
+bytes actually returned by the bridge, rather than the smaller native Connect
+JSON representation.
+
 `MountHandlers` builds each proto handler with an automatic standard error-detail
 interceptor; prepend the supplied options before any service-specific handler options.
+The handler factory is called separately for native and bridge codecs. Register
+collectors and construct stateful interceptors outside the factory so both routes
+share the same instances.
 Errors implementing `ErrorCode() string`, including wrapped causes, receive one
 `loke.rpc.v1.Error` detail. Existing details and Connect status codes are preserved;
 ordinary coded errors use Connect's `unknown` code. Optional `Public() bool`,

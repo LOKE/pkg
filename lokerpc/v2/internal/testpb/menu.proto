@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package loke.rpc.test.v2;
+option go_package = "github.com/LOKE/pkg/lokerpc/v2/internal/testpb";
+import "google/protobuf/empty.proto";
+
+// A representative menu payload used only by the HTTP bridge benchmark.
+message BenchmarkMenu {
+  repeated BenchmarkProduct products = 1;
+}
+message BenchmarkProduct {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  int32 price = 4;
+  bool available = 5;
+  repeated string tags = 6;
+  repeated BenchmarkOption options = 7;
+}
+message BenchmarkOption {
+  string id = 1;
+  string name = 2;
+  int32 price = 3;
+}
+service BenchmarkMenuService {
+  rpc Encode(google.protobuf.Empty) returns (BenchmarkMenu);
+  rpc Decode(BenchmarkMenu) returns (google.protobuf.Empty);
+}

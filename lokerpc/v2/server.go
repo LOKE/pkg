@@ -37,6 +37,8 @@ type Meta struct {
 type Service struct {
 	Name string
 	// Handler must prepend the supplied options before service-specific options.
+	// It is called separately for native and bridge codecs. Keep registration
+	// side effects outside this factory and share stateful interceptor instances.
 	Handler func(...connect.HandlerOption) (string, http.Handler)
 	// NoBridge disables legacy method routes so a same-name v1 service can keep them.
 	NoBridge bool
@@ -52,6 +54,7 @@ func MountHandlers(logger log.Logger, mux v1.Mux, services []Service, legacy ...
 	paths := make(map[string]bool)
 	descriptors := make([]protoreflect.ServiceDescriptor, len(services))
 	handlers := make([]http.Handler, len(services))
+	bridgeHandlers := make([]http.Handler, len(services))
 	servicePaths := make([]string, len(services))
 	for i, service := range services {
 		if service.Handler == nil {
@@ -62,6 +65,13 @@ func MountHandlers(logger log.Logger, mux v1.Mux, services []Service, legacy ...
 			return fmt.Errorf("service %q requires a handler", service.Name)
 		}
 		servicePaths[i], handlers[i] = path, handler
+		if !service.NoBridge {
+			bridgePath, bridgeHandler := service.Handler(connect.WithInterceptors(errorInterceptor{}), connect.WithCodec(legacyJSONCodec{}))
+			if bridgeHandler == nil || bridgePath != path {
+				return fmt.Errorf("service %q requires a matching bridge handler", service.Name)
+			}
+			bridgeHandlers[i] = bridgeHandler
+		}
 		descriptor, err := protoregistry.GlobalFiles.FindDescriptorByName(protoreflect.FullName(strings.Trim(path, "/")))
 		if err != nil {
 			return fmt.Errorf("resolve service %q: %w", service.Name, err)
@@ -114,7 +124,7 @@ func MountHandlers(logger log.Logger, mux v1.Mux, services []Service, legacy ...
 	for i, service := range services {
 		mux.Handle(servicePaths[i], handlers[i])
 		if !service.NoBridge {
-			mux.Handle("/rpc/"+service.Name+"/", bridge(logger, service.Name, servicePaths[i], handlers[i], descriptors[i]))
+			mux.Handle("/rpc/"+service.Name+"/", bridge(logger, service.Name, servicePaths[i], bridgeHandlers[i], descriptors[i]))
 		}
 		mux.Handle("/rpc/"+service.Name, metadata[i])
 	}
@@ -268,20 +278,29 @@ func bridge(logger log.Logger, serviceName, servicePath string, handler http.Han
 		forward.URL.RawPath = ""
 		forward.Body = io.NopCloser(bytes.NewReader(body))
 		forward.ContentLength = int64(len(body))
-		forward.Header.Set("Content-Type", "application/json")
+		forward.Header.Set("Content-Type", "application/loke-legacy-json")
 		forward.Header.Set("Connect-Protocol-Version", "1")
 		forward.Header.Set("Accept-Encoding", "identity")
-		response := newBufferedResponse()
+		response := &bridgeResponse{destination: w, header: make(http.Header)}
 		handler.ServeHTTP(response, forward)
+		if response.status == 0 {
+			response.status = http.StatusOK
+		}
+		if response.streamed {
+			return
+		}
 		responseBody, err := decodeBody(response.body.Bytes(), response.header.Get("Content-Encoding"))
 		if err != nil {
 			failure, failureMessage = "internal", err.Error()
 			writeJSON(w, http.StatusInternalServerError, errorBody{Message: failureMessage})
 			return
 		}
-		for name, values := range response.header {
-			if name != "Content-Type" && name != "Content-Length" && name != "Content-Encoding" && name != "Accept-Encoding" && !strings.HasPrefix(name, "Trailer-") {
-				w.Header()[name] = values
+		copyBridgeHeaders(w, response.header)
+		if response.status == http.StatusOK && len(responseBody) == 0 {
+			if err := protojson.Unmarshal(responseBody, dynamicpb.NewMessage(method.Output())); err != nil {
+				failure, failureMessage = "internal", err.Error()
+				writeJSON(w, http.StatusInternalServerError, errorBody{Message: failureMessage})
+				return
 			}
 		}
 		if response.status != http.StatusOK {
@@ -330,19 +349,9 @@ func bridge(logger log.Logger, serviceName, servicePath string, handler http.Han
 			writeJSON(w, status, result)
 			return
 		}
-		result := dynamicpb.NewMessage(method.Output())
-		err = protojson.Unmarshal(responseBody, result)
-		if err == nil {
-			body, err = (protojson.MarshalOptions{EmitDefaultValues: true}).Marshal(result)
-		}
-		if err != nil {
-			failure, failureMessage = "internal", err.Error()
-			writeJSON(w, http.StatusInternalServerError, errorBody{Message: err.Error()})
-			return
-		}
 		w.Header().Set("Content-Type", v1.ContentType)
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(body)
+		_, _ = w.Write(responseBody)
 	})
 }
 
@@ -358,15 +367,49 @@ func decodeBody(body []byte, encoding string) ([]byte, error) {
 	return io.ReadAll(reader)
 }
 
-type bufferedResponse struct {
-	header http.Header
-	body   bytes.Buffer
-	status int
+// bridgeResponse forwards successful identity responses without copying their
+// body. Errors still need translation, and compressed responses still need
+// decoding, so both retain the buffered path.
+type bridgeResponse struct {
+	destination http.ResponseWriter
+	header      http.Header
+	body        bytes.Buffer
+	status      int
+	streamed    bool
 }
 
-func newBufferedResponse() *bufferedResponse {
-	return &bufferedResponse{header: make(http.Header), status: http.StatusOK}
+func (w *bridgeResponse) Header() http.Header { return w.header }
+
+func (w *bridgeResponse) WriteHeader(status int) {
+	if w.status != 0 {
+		return
+	}
+	w.status = status
 }
-func (w *bufferedResponse) Header() http.Header            { return w.header }
-func (w *bufferedResponse) WriteHeader(status int)         { w.status = status }
-func (w *bufferedResponse) Write(body []byte) (int, error) { return w.body.Write(body) }
+
+func (w *bridgeResponse) Write(body []byte) (int, error) {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	if !w.streamed && len(body) > 0 && w.status == http.StatusOK {
+		encoding := w.header.Get("Content-Encoding")
+		if encoding == "" || encoding == "identity" {
+			w.streamed = true
+			copyBridgeHeaders(w.destination, w.header)
+			w.destination.Header().Set("Content-Type", v1.ContentType)
+			w.destination.WriteHeader(w.status)
+		}
+	}
+	if w.streamed {
+		return w.destination.Write(body)
+	}
+	return w.body.Write(body)
+}
+
+func copyBridgeHeaders(w http.ResponseWriter, header http.Header) {
+	for name, values := range header {
+		if name != "Content-Type" && name != "Content-Length" && name != "Content-Encoding" && name != "Accept-Encoding" && !strings.HasPrefix(name, "Trailer-") {
+			w.Header()[name] = values
+		}
+	}
+}
