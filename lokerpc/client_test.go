@@ -39,7 +39,7 @@ func TestNewClientNormalizesBaseURL(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			c := newClientWithClient(tc.baseURL, http.DefaultClient)
+			c := NewClient(tc.baseURL)
 
 			if c.bURL != tc.expected {
 				t.Fatalf("expected normalized base URL %q, got %q", tc.expected, c.bURL)
@@ -130,6 +130,24 @@ func TestClient_DoRequest(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestClient_DoRequestWithoutCodecsNeverProbes(t *testing.T) {
+	var methods []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL)
+	for range 2 {
+		if err := c.DoRequest(context.Background(), "method", nil, nil); err != nil {
+			t.Fatalf("DoRequest() error = %v", err)
+		}
+	}
+	if !reflect.DeepEqual(methods, []string{"POST", "POST"}) {
+		t.Errorf("methods = %v, want only POSTs", methods)
 	}
 }
 

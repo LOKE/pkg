@@ -85,6 +85,15 @@ func TestMountHandlers(t *testing.T) {
 			wantBody:   `{"message":"some error","instance":"123","code":"bar","namespace":"foo","type":"https://example.com/errors/foo/bar"}`,
 			wantStatus: 400,
 		},
+		{
+			name: "options on service without codecs",
+			req:  httptest.NewRequest("OPTIONS", "/rpc/service1", nil),
+			endpointCoded: MakeStandardEndpointCodec(func(ctx context.Context, req Foo) (Foo, error) {
+				return req, nil
+			}, ""),
+			wantBody:   "Method not allowed",
+			wantStatus: 405,
+		},
 	}
 
 	for _, tt := range tests {
