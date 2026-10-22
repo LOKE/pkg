@@ -161,14 +161,19 @@ func TestClient_DoRequestSendsDeadline(t *testing.T) {
 func TestClient_ErrorDetail(t *testing.T) {
 	const cardDeclined = `{"message":"declined","instance":"abc","expose":true,"code":"card_declined","type":"https://example.com/errors/card_declined","paymentIntentId":"pi_123","declineCode":"insufficient_funds","attempts":3}`
 
+	const capitalised = `{"Message":"declined","Code":"card_declined","paymentIntentId":"pi_1"}`
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := cardDeclined
-		if r.URL.Path == "/plain" {
+		switch r.URL.Path {
+		case "/plain":
 			body = `{"message":"plain"}`
+		case "/capitalised":
+			body = capitalised
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(400)
-		io.WriteString(w, body)
+		_, _ = io.WriteString(w, body)
 	}))
 	defer server.Close()
 
@@ -191,6 +196,8 @@ func TestClient_ErrorDetail(t *testing.T) {
 		{name: "wrapped error", method: "declined", wrap: true, key: "paymentIntentId", into: &intentID, wantFound: true, want: "pi_123"},
 		{name: "unknown key", method: "declined", key: "nope", into: &wrongType},
 		{name: "known field is not a detail", method: "declined", key: "message", into: &wrongType},
+		{name: "capitalised known field is not a detail", method: "capitalised", key: "Message", into: &wrongType},
+		{name: "capitalised body keeps details", method: "capitalised", key: "paymentIntentId", into: &intentID, wantFound: true, want: "pi_1"},
 		{name: "no extra fields", method: "plain", key: "paymentIntentId", into: &wrongType},
 		{name: "type mismatch", method: "declined", key: "attempts", into: &wrongType, wantFound: true, wantErr: true},
 	}
@@ -221,23 +228,28 @@ func TestClient_ErrorDetail(t *testing.T) {
 	})
 
 	t.Run("known fields still decoded", func(t *testing.T) {
-		err := NewClient(server.URL).DoRequest(context.Background(), "declined", nil, nil)
+		tests := []struct {
+			name   string
+			method string
+			want   rpcClientError
+		}{
+			{"lowercase", "declined", rpcClientError{Message: "declined", Instance: "abc", Expose: true, Code: "card_declined", Type: "https://example.com/errors/card_declined"}},
+			{"capitalised", "capitalised", rpcClientError{Message: "declined", Code: "card_declined"}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				err := NewClient(server.URL).DoRequest(context.Background(), tt.method, nil, nil)
 
-		rpcErr, ok := errors.AsType[*rpcClientError](err)
-		if !ok {
-			t.Fatalf("expected *rpcClientError, got %T", err)
-		}
-		want := rpcClientError{
-			Message:  "declined",
-			Instance: "abc",
-			Expose:   true,
-			Code:     "card_declined",
-			Type:     "https://example.com/errors/card_declined",
-		}
-		got := *rpcErr
-		got.Rest = nil
-		if !reflect.DeepEqual(got, want) {
-			t.Errorf("decoded %+v, want %+v", got, want)
+				rpcErr, ok := errors.AsType[*rpcClientError](err)
+				if !ok {
+					t.Fatalf("expected *rpcClientError, got %T", err)
+				}
+				got := *rpcErr
+				got.Rest = nil
+				if !reflect.DeepEqual(got, tt.want) {
+					t.Errorf("decoded %+v, want %+v", got, tt.want)
+				}
+			})
 		}
 	})
 

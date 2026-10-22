@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"encoding/json/jsontext"
-	jsonv2 "encoding/json/v2"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -54,27 +52,21 @@ type rpcClientError struct {
 	Namespace string `json:"namespace,omitempty"`
 	Type      string `json:"type,omitempty"`
 
-	Rest jsontext.Value `json:",embed"`
+	Rest map[string]json.RawMessage `json:",embed"`
 }
 
 // ErrorDetail decodes the upstream RPC error field key into v, reporting whether it was present.
 func ErrorDetail(err error, key string, v any) (bool, error) {
 	rpcErr, ok := errors.AsType[*rpcClientError](err)
-	if !ok || rpcErr.Rest == nil {
-		return false, nil
-	}
-
-	var fields map[string]jsontext.Value
-	err = jsonv2.Unmarshal(rpcErr.Rest, &fields)
-	if err != nil {
-		return false, err
-	}
-
-	raw, ok := fields[key]
 	if !ok {
 		return false, nil
 	}
-	return true, jsonv2.Unmarshal(raw, v)
+
+	raw, ok := rpcErr.Rest[key]
+	if !ok {
+		return false, nil
+	}
+	return true, json.Unmarshal(raw, v)
 }
 
 func (e *rpcClientError) ErrorID() string {
@@ -184,7 +176,7 @@ func (c Client) DoRequest(ctx context.Context, method string, args, result any) 
 		return fmt.Errorf("Error rpc method not found: %v", url)
 	default:
 		err := &rpcClientError{}
-		jsonErr := jsonv2.UnmarshalRead(res.Body, err)
+		jsonErr := json.NewDecoder(res.Body).Decode(err)
 		if jsonErr != nil {
 			return fmt.Errorf("Error decoding rpc error response: %v", jsonErr)
 		}

@@ -2,7 +2,7 @@ package lokerpc
 
 import (
 	"context"
-	"encoding/json/jsontext"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -93,10 +93,10 @@ func TestMountHandlers(t *testing.T) {
 				return nil, &rpcClientError{
 					Message: "some error",
 					Code:    "bar",
-					Rest:    jsontext.Value(`{"paymentIntentId":"pi_123","attempts":3}`),
+					Rest:    map[string]json.RawMessage{"paymentIntentId": json.RawMessage(`"pi_123"`), "attempts": json.RawMessage(`3`)},
 				}
 			}, ""),
-			wantBody:   `{"message":"some error","code":"bar","paymentIntentId":"pi_123","attempts":3}`,
+			wantBody:   `{"message":"some error","code":"bar","attempts":3,"paymentIntentId":"pi_123"}`,
 			wantStatus: 400,
 		},
 	}
