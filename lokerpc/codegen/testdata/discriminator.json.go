@@ -42,9 +42,9 @@ func (v *AddActivityRequestItemCreditExpired) marshalJSON() ([]byte, error) {
 }
 
 type AddActivityRequestItemMessage struct {
-	Body         string `json:"body"`
-	Title        string `json:"title"`
-	LocationName string `json:"locationName,omitempty"`
+	Body         string  `json:"body"`
+	Title        string  `json:"title"`
+	LocationName *string `json:"locationName,omitempty"`
 }
 
 func (*AddActivityRequestItemMessage) isAddActivityRequestItemVariant() {}
@@ -60,9 +60,9 @@ func (v *AddActivityRequestItemMessage) marshalJSON() ([]byte, error) {
 }
 
 type AddActivityRequestItemPoints struct {
-	Points       int32  `json:"points"`
-	Title        string `json:"title"`
-	LocationName string `json:"locationName,omitempty"`
+	Points       int32   `json:"points"`
+	Title        string  `json:"title"`
+	LocationName *string `json:"locationName,omitempty"`
 }
 
 func (*AddActivityRequestItemPoints) isAddActivityRequestItemVariant() {}
@@ -176,7 +176,7 @@ type AddActivityResponseMessage struct {
 	ID           string    `json:"id"`
 	Timestamp    time.Time `json:"timestamp"`
 	Title        string    `json:"title"`
-	LocationName string    `json:"locationName,omitempty"`
+	LocationName *string   `json:"locationName,omitempty"`
 }
 
 func (*AddActivityResponseMessage) isAddActivityResponseVariant() {}
@@ -197,7 +197,7 @@ type AddActivityResponsePoints struct {
 	PointsText   string    `json:"pointsText"`
 	Timestamp    time.Time `json:"timestamp"`
 	Title        string    `json:"title"`
-	LocationName string    `json:"locationName,omitempty"`
+	LocationName *string   `json:"locationName,omitempty"`
 }
 
 func (*AddActivityResponsePoints) isAddActivityResponseVariant() {}
