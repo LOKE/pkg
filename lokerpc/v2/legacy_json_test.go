@@ -3,6 +3,10 @@ package lokerpc
 import (
 	"bytes"
 	"math"
+	"math/rand/v2"
+	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/LOKE/pkg/lokerpc/v2/internal/testpb"
@@ -198,4 +202,86 @@ func FuzzLegacyJSONDecodeMatchesProtoJSON(f *testing.F) {
 			t.Fatal("decoded messages differ")
 		}
 	})
+}
+
+func TestLegacyJSONCompiledPlan(t *testing.T) {
+	message := &testpb.BenchmarkMenu{}
+	if legacyPlan(reflect.TypeOf(message), message.ProtoReflect().Descriptor()) == nil {
+		t.Fatal("benchmark message must use the compiled encoder")
+	}
+	random := rand.New(rand.NewPCG(1, 2))
+	for range 500 {
+		text := make([]rune, random.IntN(128))
+		alphabet := []rune("ASCII words <>&\"\\\n\té日\u2028🙂")
+		for i := range text {
+			text[i] = alphabet[random.IntN(len(alphabet))]
+		}
+		product := &testpb.BenchmarkProduct{
+			Id: string(text), Name: string(text), Description: string(text),
+			Price: int32(random.Uint32()), Available: random.IntN(2) == 0,
+			Tags:    []string{string(text), ""},
+			Options: []*testpb.BenchmarkOption{nil, {Id: string(text), Price: int32(random.Uint32())}},
+		}
+		message.Products = []*testpb.BenchmarkProduct{nil, product, {}}
+		compareLegacyJSON(t, message)
+	}
+	for offset := range 17 {
+		for _, suffix := range []string{"é", "日", "🙂", "\u2028", "é\"\\\n"} {
+			text := string(bytes.Repeat([]byte("a"), offset)) + suffix
+			compareLegacyJSON(t, &testpb.BenchmarkOption{Name: text})
+		}
+	}
+	// Exercise every byte at each position surrounding a word-scan boundary.
+	for length := range 25 {
+		for b := range 256 {
+			text := bytes.Repeat([]byte("a"), length)
+			for i := range text {
+				text[i] = byte(b)
+				compareLegacyJSON(t, &testpb.BenchmarkOption{Name: string(text)})
+				text[i] = 'a'
+			}
+		}
+	}
+}
+
+func FuzzLegacyJSONCompiledPlan(f *testing.F) {
+	for _, text := range []string{"", "plain ASCII text across word boundaries", "aaaaaaaé\u2028", "before\\after\n", string([]byte{255})} {
+		f.Add([]byte(text), int32(42))
+	}
+	f.Fuzz(func(t *testing.T, text []byte, price int32) {
+		compareLegacyJSON(t, &testpb.BenchmarkMenu{Products: []*testpb.BenchmarkProduct{{
+			Id: string(text), Name: string(text), Description: string(text), Price: price,
+			Tags: []string{string(text)}, Options: []*testpb.BenchmarkOption{nil, {Name: string(text), Price: price}},
+		}}})
+	})
+}
+
+func TestLegacyJSONPlanScalarKinds(t *testing.T) {
+	message := legacyJSONFixture()
+	reflected := message.ProtoReflect()
+	goValue := reflect.ValueOf(message).Elem()
+	for i := range reflected.Descriptor().Fields().Len() {
+		descriptor := reflected.Descriptor().Fields().Get(i)
+		if descriptor.IsList() || descriptor.IsMap() || descriptor.ContainingOneof() != nil {
+			continue
+		}
+		// Field tags link the native Go representation to the same descriptor
+		// used by the already differential-tested reflection encoder.
+		for j := range goValue.NumField() {
+			goField := goValue.Type().Field(j)
+			if !goField.IsExported() || goField.Tag.Get("protobuf") == "" {
+				continue
+			}
+			parts := strings.Split(goField.Tag.Get("protobuf"), ",")
+			if parts[1] != strconv.Itoa(int(descriptor.Number())) {
+				continue
+			}
+			field := legacyFieldPlan{descriptor: descriptor, kind: descriptor.Kind()}
+			got, gotErr := field.append(nil, goValue.Field(j), 0)
+			want, wantErr := appendLegacyScalar(nil, reflected.Get(descriptor), descriptor, 0)
+			if (gotErr == nil) != (wantErr == nil) || !bytes.Equal(got, want) {
+				t.Fatalf("%s: got %s (%v), want %s (%v)", descriptor.FullName(), got, gotErr, want, wantErr)
+			}
+		}
+	}
 }

@@ -104,11 +104,12 @@ func BenchmarkMenuBridgeHTTP(b *testing.B) {
 	if err := v2.MountHandlers(log.NewNopLogger(), v2mux, []v2.Service{service}); err != nil {
 		b.Fatal(err)
 	}
-	for _, server := range []struct {
+	servers := []struct {
 		name    string
 		handler http.Handler
-	}{{"v1", v1mux}, {"bridge", v2mux}} {
-		for _, operation := range []string{"encode", "decode"} {
+	}{{"v1", v1mux}, {"bridge", v2mux}}
+	for _, operation := range []string{"encode", "decode"} {
+		for _, server := range servers {
 			requestBody := []byte("{}")
 			if operation == "decode" {
 				requestBody = body

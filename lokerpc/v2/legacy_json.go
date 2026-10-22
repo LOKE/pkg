@@ -3,8 +3,10 @@ package lokerpc
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"math"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -62,8 +64,22 @@ func legacyFields(descriptor protoreflect.MessageDescriptor) ([]legacyJSONField,
 	return actual.([]legacyJSONField), nil
 }
 
+var legacyJSONBuffers = sync.Pool{New: func() any {
+	buffer := make([]byte, 0, 4096)
+	return &buffer
+}}
+
 func (codec legacyJSONCodec) Marshal(value any) ([]byte, error) {
-	return codec.MarshalAppend(nil, value)
+	buffer := legacyJSONBuffers.Get().(*[]byte)
+	data, err := codec.MarshalAppend((*buffer)[:0], value)
+	if err != nil {
+		legacyJSONBuffers.Put(buffer)
+		return nil, err
+	}
+	result := bytes.Clone(data)
+	*buffer = data[:0]
+	legacyJSONBuffers.Put(buffer)
+	return result, nil
 }
 
 // MarshalAppend lets Connect reuse its response buffer.
@@ -76,7 +92,12 @@ func (legacyJSONCodec) MarshalAppend(data []byte, value any) ([]byte, error) {
 		return legacyMarshal.MarshalAppend(data, message)
 	}
 	original := data
-	data, err := appendLegacyMessage(data, message.ProtoReflect(), 0)
+	var err error
+	if plan := legacyPlan(reflect.TypeOf(message), message.ProtoReflect().Descriptor()); plan != nil {
+		data, err = plan.append(data, reflect.ValueOf(message).Elem(), 0)
+	} else {
+		data, err = appendLegacyMessage(data, message.ProtoReflect(), 0)
+	}
 	if err == nil {
 		err = proto.CheckInitialized(message)
 	}
@@ -257,7 +278,21 @@ func appendLegacyScalar(data []byte, value protoreflect.Value, descriptor protor
 func appendLegacyString(data []byte, value string) ([]byte, error) {
 	data = append(data, '"')
 	start := 0
-	for i := 0; i < len(value); {
+	// Most response text is plain ASCII. Scan eight bytes at a time without
+	// allocating or touching the rune decoder on this common path.
+	for start+8 <= len(value) {
+		word := binary.LittleEndian.Uint64([]byte(value[start : start+8]))
+		const low = uint64(0x0101010101010101)
+		const high = uint64(0x8080808080808080)
+		quote, slash := word^(low*'"'), word^(low*'\\')
+		if word&high != 0 || (word-low*' ')&^word&high != 0 ||
+			(quote-low)&^quote&high != 0 || (slash-low)&^slash&high != 0 {
+			break
+		}
+		start += 8
+	}
+	data = append(data, value[:start]...)
+	for i := start; i < len(value); {
 		c := value[i]
 		if c >= utf8.RuneSelf {
 			r, size := utf8.DecodeRuneInString(value[i:])

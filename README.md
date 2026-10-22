@@ -110,9 +110,12 @@ available on the native Connect routes.
 
 The bridge uses a dedicated `loke-legacy-json` codec to write default-valued
 protobuf JSON directly into Connect's reusable response buffer, avoiding a
-dynamic-message decode and second encode. Field names are cached per descriptor;
-maps remain sorted and protobuf JSON scalar formatting is preserved. Well-known
-types and proto2 messages use `protojson` for their specialized semantics. Requests
+dynamic-message decode and second encode. Generated open messages without
+presence fields or maps use cached struct-field plans and prequoted JSON keys;
+string encoding scans plain ASCII eight bytes at a time. Standalone marshaling
+reuses a pooled scratch buffer. Other messages retain protobuf reflection,
+sorted maps and protobuf JSON scalar formatting. Well-known types and proto2
+messages use `protojson` for their specialized semantics. Requests
 retain `protojson` validation and unknown-field handling, with a fast path for
 empty ordinary messages. Native Connect JSON, handler options and compression
 behavior are unchanged; the bridge codec is not exposed on native Connect routes.
