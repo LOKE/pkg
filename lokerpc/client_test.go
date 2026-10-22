@@ -39,7 +39,7 @@ func TestNewClientNormalizesBaseURL(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			c := newClientWithClient(tc.baseURL, http.DefaultClient)
+			c := NewClient(tc.baseURL)
 
 			if c.bURL != tc.expected {
 				t.Fatalf("expected normalized base URL %q, got %q", tc.expected, c.bURL)
@@ -62,6 +62,10 @@ func TestClient_DoRequest(t *testing.T) {
 		w.WriteHeader(400)
 		w.Write(body)
 	})
+	mux.HandleFunc("/extra_field", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"Foo":"bar","Extra":1}`))
+	})
 	mux.HandleFunc("/drop", func(w http.ResponseWriter, r *http.Request) {
 		conn, _, _ := http.NewResponseController(w).Hijack()
 		conn.Close()
@@ -74,6 +78,7 @@ func TestClient_DoRequest(t *testing.T) {
 		name string // description of this test case
 		// Named input parameters for target function.
 		method      string
+		opts        []ClientOption
 		args        any
 		result      any
 		want        any
@@ -97,6 +102,27 @@ func TestClient_DoRequest(t *testing.T) {
 			wantErrCode: "foo_bar",
 		},
 		{
+			name:   "default engine ignores unknown response fields",
+			method: "extra_field",
+			result: &struct{ Foo string }{},
+			want:   &struct{ Foo string }{Foo: "bar"},
+		},
+		{
+			name:   "custom JSON engine echo",
+			method: "echo",
+			opts:   []ClientOption{ClientJSON(strictJSON{})},
+			args:   struct{ Foo string }{Foo: "bar"},
+			result: &struct{ Foo string }{},
+			want:   &struct{ Foo string }{Foo: "bar"},
+		},
+		{
+			name:    "custom JSON engine rejects unknown response fields",
+			method:  "extra_field",
+			opts:    []ClientOption{ClientJSON(strictJSON{})},
+			result:  &struct{ Foo string }{},
+			wantErr: true,
+		},
+		{
 			name:    "drop",
 			method:  "drop",
 			wantErr: true,
@@ -110,7 +136,7 @@ func TestClient_DoRequest(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 
-			c := NewClient(server.URL)
+			c := NewClient(server.URL, tt.opts...)
 			gotErr := c.DoRequest(context.Background(), tt.method, tt.args, tt.result)
 
 			if tt.wantErr == (gotErr == nil) {
@@ -130,6 +156,24 @@ func TestClient_DoRequest(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestClient_DoRequestWithoutCodecsNeverProbes(t *testing.T) {
+	var methods []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL)
+	for range 2 {
+		if err := c.DoRequest(context.Background(), "method", nil, nil); err != nil {
+			t.Fatalf("DoRequest() error = %v", err)
+		}
+	}
+	if !reflect.DeepEqual(methods, []string{"POST", "POST"}) {
+		t.Errorf("methods = %v, want only POSTs", methods)
 	}
 }
 

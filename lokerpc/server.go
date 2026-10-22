@@ -8,8 +8,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"maps"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/LOKE/pkg/errors"
@@ -64,15 +67,21 @@ type Service struct {
 	Help string
 
 	endpointCodecs EndpointCodecMap
+	codecs         []Codec
+	json           JSON
 }
 
 // NewService creates a new Service
-func NewService(name, help string, ecm EndpointCodecMap) *Service {
-	return &Service{
+func NewService(name, help string, ecm EndpointCodecMap, opts ...ServiceOption) *Service {
+	s := &Service{
 		Name:           name,
 		Help:           help,
 		endpointCodecs: ecm,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Endpoint is an abstract rpc endpoint
@@ -220,7 +229,7 @@ func NewServer(serviceName string, ecm EndpointCodecMap, logger log.Logger) http
 	for methodName, ec := range ecm {
 		l := log.With(logger, "rpc_service", serviceName, "method", methodName)
 
-		mux.HandleFunc("/"+methodName, makeHandler(l, ec))
+		mux.HandleFunc("/"+methodName, makeHandler(l, ec, nil, nil))
 		meta.Interfaces = append(meta.Interfaces, EndpointMeta{
 			MethodName:    methodName,
 			MethodTimeout: 60000,
@@ -280,10 +289,10 @@ func MountHandlers(logger log.Logger, mux Mux, services ...*Service) {
 			Help:        service.Help,
 		}
 
-		for methodName, ec := range ecm {
-			l := log.With(logger, "rpc_service", service.Name, "method", methodName)
+		methodNames := slices.Sorted(maps.Keys(ecm))
 
-			mux.Handle("/rpc/"+service.Name+"/"+methodName, makeHandler(l, ec))
+		for _, methodName := range methodNames {
+			ec := ecm[methodName]
 
 			endMeta := EndpointMeta{
 				MethodName:    methodName,
@@ -312,8 +321,22 @@ func MountHandlers(logger log.Logger, mux Mux, services ...*Service) {
 
 		meta.Definitions = TypeDefs(defs)
 
+		var negotiation *serverNegotiation
+		if len(service.codecs) > 0 {
+			var err error
+			negotiation, err = newServerNegotiation(service.codecs, meta)
+			if err != nil {
+				panic(err)
+			}
+		}
+
+		for i, methodName := range methodNames {
+			l := log.With(logger, "rpc_service", service.Name, "method", methodName)
+			mux.Handle("/rpc/"+service.Name+"/"+methodName, makeHandler(l, ecm[methodName], negotiation.forEndpoint(i), service.json))
+		}
+
 		// service meta endpoint
-		mux.Handle("/rpc/"+service.Name, newMetaHandler(meta))
+		mux.Handle("/rpc/"+service.Name, negotiation.wrapMetaHandler(newMetaHandler(meta), meta))
 
 		rootmeta.Services = append(rootmeta.Services, meta)
 	}
@@ -405,7 +428,7 @@ func wrapEndpoint(handlerName string, e Endpoint) Endpoint {
 	}
 }
 
-func makeHandler(logger log.Logger, ec EndpointCodec) http.HandlerFunc {
+func makeHandler(logger log.Logger, ec EndpointCodec, neg *endpointNegotiation, jsonImpl JSON) http.HandlerFunc {
 	logErr := level.Error(logger).Log
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -415,19 +438,60 @@ func makeHandler(logger log.Logger, ec EndpointCodec) http.HandlerFunc {
 		}
 		ctx := r.Context()
 
-		// Decode the body into an  object
-		var jsonParams json.RawMessage
-		err := json.NewDecoder(r.Body).Decode(&jsonParams)
-		if err != nil {
-			writeBadReq(w, "JSON could not be decoded: %v", err)
+		requestCodec, responseCodec := neg.codecsFor(r)
+		needsMatch := requestCodec != nil && !isSchemaFree(requestCodec) || responseCodec != nil && !isSchemaFree(responseCodec)
+		if needsMatch && r.Header.Get("If-Match") != neg.etag {
+			writeJSONError(w, http.StatusPreconditionFailed, "schema changed")
 			return
 		}
 
-		// Decode the JSON "params"
-		reqParams, err := ec.Decode(ctx, jsonParams)
-		if err != nil {
-			writeBadReq(w, "Invalid request: %v", err)
+		var reqParams any
+		var err error
+		switch {
+		case requestCodec != nil && ec.requestType == nil:
+			writeJSONError(w, http.StatusUnsupportedMediaType, "endpoint does not support "+requestCodec.ContentType())
 			return
+		case requestCodec != nil:
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				writeJSONError(w, http.StatusBadRequest, "request could not be read: "+err.Error())
+				return
+			}
+			req := reflect.New(ec.requestType)
+			err = requestCodec.Unmarshal(body, req.Interface(), neg.requestSchema, neg.defs)
+			if err != nil {
+				writeJSONError(w, http.StatusBadRequest, "Invalid request: "+err.Error())
+				return
+			}
+			reqParams = req.Elem().Interface()
+		case jsonImpl != nil && ec.requestType != nil:
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				writeBadReq(w, "JSON could not be decoded: %v", err)
+				return
+			}
+			req := reflect.New(ec.requestType)
+			err = jsonImpl.Unmarshal(body, req.Interface())
+			if err != nil {
+				writeBadReq(w, "Invalid request: %v", err)
+				return
+			}
+			reqParams = req.Elem().Interface()
+		default:
+			// Decode the body into an  object
+			var jsonParams json.RawMessage
+			err = json.NewDecoder(r.Body).Decode(&jsonParams)
+			if err != nil {
+				writeBadReq(w, "JSON could not be decoded: %v", err)
+				return
+			}
+
+			// Decode the JSON "params"
+			reqParams, err = ec.Decode(ctx, jsonParams)
+			if err != nil {
+				writeBadReq(w, "Invalid request: %v", err)
+				return
+			}
 		}
 
 		// Call the Endpoint with the params
@@ -460,10 +524,48 @@ func makeHandler(logger log.Logger, ec EndpointCodec) http.HandlerFunc {
 			}
 		}
 
+		if status == http.StatusOK && responseCodec != nil {
+			var body []byte
+			if !ec.voidResponse {
+				body, err = responseCodec.Marshal(result, neg.responseSchema, neg.defs)
+				if err != nil {
+					logErr("msg", "response encode error", "err", err)
+					writeJSONError(w, http.StatusInternalServerError, "response could not be encoded")
+					return
+				}
+			}
+			w.Header().Set("Content-Type", responseCodec.ContentType())
+			w.Header().Set("Vary", "Accept")
+			w.WriteHeader(status)
+			_, _ = w.Write(body)
+			return
+		}
+
+		if jsonImpl != nil {
+			body, err := jsonImpl.Marshal(result)
+			if err != nil {
+				logErr("msg", "response encode error", "err", err)
+				writeJSONError(w, http.StatusInternalServerError, "response could not be encoded")
+				return
+			}
+			w.Header().Set("Content-Type", ContentType)
+			w.WriteHeader(status)
+			_, _ = w.Write(body)
+			return
+		}
+
 		w.Header().Set("Content-Type", ContentType)
 		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(result)
 	}
+}
+
+func writeJSONError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", ContentType)
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(struct {
+		Message string `json:"message"`
+	}{message})
 }
 
 func writeBadReq(w http.ResponseWriter, format string, a ...interface{}) {

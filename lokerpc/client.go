@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -35,12 +38,12 @@ func init() {
 	prometheus.MustRegister(clientFailures)
 }
 
-func NewClient(baseURL string) Client {
-	return newClientWithClient(baseURL, http.DefaultClient)
-}
-
-func newClientWithClient(baseURL string, client *http.Client) Client {
-	return Client{bURL: normalizeBaseURL(baseURL), client: client}
+func NewClient(baseURL string, opts ...ClientOption) Client {
+	c := Client{bURL: normalizeBaseURL(baseURL), client: http.DefaultClient}
+	for _, opt := range opts {
+		opt(&c)
+	}
+	return c
 }
 
 // NOTE: Maybe this should be exported, leaving it for now -- Dom
@@ -79,6 +82,10 @@ func (e *rpcClientError) Error() string {
 type Client struct {
 	bURL   string
 	client *http.Client
+
+	codecs  []Codec
+	session *clientSession
+	json    JSON
 }
 
 func normalizeBaseURL(baseURL string) string {
@@ -86,38 +93,23 @@ func normalizeBaseURL(baseURL string) string {
 }
 
 func (c Client) DoRequest(ctx context.Context, method string, args, result any) (finalErr error) {
-	b := new(bytes.Buffer)
-	if err := json.NewEncoder(b).Encode(args); err != nil {
-		return err
-	}
-
 	url := c.bURL + method
-	req, err := http.NewRequest("POST", url, b)
-	if err != nil {
-		return err
-	}
 
 	defer prometheus.NewTimer(clientLatency.WithLabelValues(c.bURL, method)).ObserveDuration()
 	clientRequestCount.WithLabelValues(c.bURL, method).Inc()
 
-	req.Header.Set("Content-Type", "application/json")
-
-	if reqID, ok := requestid.FromContext(ctx); ok {
-		req.Header.Set("X-Request-ID", reqID.String())
+	var session *negotiated
+	if c.session != nil {
+		session = c.session.negotiate(ctx, c.client, strings.TrimSuffix(c.bURL, "/"), c.codecs)
 	}
 
-	if deadline, ok := ctx.Deadline(); ok {
-		// Could probably also use .Format(time.RFC3339Nano), but MarshalJSON
-		// seems to do more, and I think it'll be safer for JS
-		b, err := deadline.MarshalJSON()
-		if err == nil {
-			// string(b[1:len(b)-1]) strips the quotes from the value
-			req.Header.Set("X-Request-Deadline", string(b[1:len(b)-1]))
-		}
+	res, err := c.send(ctx, url, method, args, session)
+	if err == nil && session != nil && session.codec != nil && binaryRejected(res) {
+		res.Body.Close()
+		c.session.invalidate(session)
+		session = nil
+		res, err = c.send(ctx, url, method, args, nil)
 	}
-
-	req = req.WithContext(ctx)
-	res, err := c.client.Do(req)
 
 	defer func() {
 		if finalErr == nil {
@@ -150,10 +142,16 @@ func (c Client) DoRequest(ctx context.Context, method string, args, result any) 
 
 	switch res.StatusCode {
 	case http.StatusOK:
-		if res.ContentLength == 0 || result == nil {
+		if result == nil {
 			return nil
 		}
-		if err := json.NewDecoder(res.Body).Decode(result); err != nil {
+		if codec := findCodec(c.codecs, res.Header.Get("Content-Type")); codec != nil {
+			return c.decodeBinary(codec, res.Body, method, result, session)
+		}
+		if res.ContentLength == 0 {
+			return nil
+		}
+		if err := c.decodeJSON(res.Body, result); err != nil {
 			return fmt.Errorf("Error decoding rpc response: %v", err)
 		}
 	case http.StatusNoContent:
@@ -162,11 +160,120 @@ func (c Client) DoRequest(ctx context.Context, method string, args, result any) 
 		return fmt.Errorf("Error rpc method not found: %v", url)
 	default:
 		err := &rpcClientError{}
-		jsonErr := json.NewDecoder(res.Body).Decode(err)
+		jsonErr := c.decodeJSON(res.Body, err)
 		if jsonErr != nil {
 			return fmt.Errorf("Error decoding rpc error response: %v", jsonErr)
 		}
 		return err
 	}
 	return nil
+}
+
+// send performs one POST, using the negotiated codec when the method's schemas
+// are known and plain JSON otherwise.
+func (c Client) send(ctx context.Context, url, method string, args any, session *negotiated) (*http.Response, error) {
+	endpoint, known := session.endpoint(method)
+
+	var body bytes.Buffer
+	contentType := "application/json"
+	if known && endpoint.RequestTypeDef != nil {
+		encoded, err := session.codec.Marshal(args, endpoint.RequestTypeDef, session.defs)
+		if err != nil {
+			return nil, err
+		}
+		body.Write(encoded)
+		contentType = session.codec.ContentType()
+	} else if c.json != nil {
+		encoded, err := c.json.Marshal(args)
+		if err != nil {
+			return nil, err
+		}
+		body.Write(encoded)
+	} else {
+		err := json.NewEncoder(&body).Encode(args)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	req, err := http.NewRequest("POST", url, &body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", contentType)
+
+	if known {
+		if !isSchemaFree(session.codec) {
+			req.Header.Set("If-Match", session.etag)
+		}
+		if endpoint.ResponseTypeDef != nil {
+			req.Header.Set("Accept", session.codec.ContentType()+", application/json;q=0.5")
+		}
+	}
+
+	if reqID, ok := requestid.FromContext(ctx); ok {
+		req.Header.Set("X-Request-ID", reqID.String())
+	}
+
+	if deadline, ok := ctx.Deadline(); ok {
+		// Could probably also use .Format(time.RFC3339Nano), but MarshalJSON
+		// seems to do more, and I think it'll be safer for JS
+		b, err := deadline.MarshalJSON()
+		if err == nil {
+			// string(b[1:len(b)-1]) strips the quotes from the value
+			req.Header.Set("X-Request-Deadline", string(b[1:len(b)-1]))
+		}
+	}
+
+	return c.client.Do(req.WithContext(ctx))
+}
+
+func (c Client) decodeBinary(codec Codec, body io.Reader, method string, result any, session *negotiated) error {
+	endpoint, known := session.endpoint(method)
+	if !known || endpoint.ResponseTypeDef == nil {
+		return fmt.Errorf("Error decoding rpc response: unexpected %s response", codec.ContentType())
+	}
+
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return fmt.Errorf("Error reading rpc response: %v", err)
+	}
+	if len(data) == 0 {
+		// An empty body is a nil result, like JSON null.
+		if target := reflect.ValueOf(result); target.Kind() == reflect.Pointer && !target.IsNil() {
+			target.Elem().SetZero()
+		}
+		return nil
+	}
+
+	err = codec.Unmarshal(data, result, endpoint.ResponseTypeDef, session.defs)
+	if err != nil {
+		return fmt.Errorf("Error decoding rpc response: %v", err)
+	}
+	return nil
+}
+
+// binaryRejected reports a 412, or a 400/415 that is not JSON, which is how a
+// replica without codec support (e.g. mid rolling deploy) answers a binary body.
+func binaryRejected(res *http.Response) bool {
+	switch res.StatusCode {
+	case http.StatusPreconditionFailed:
+		return true
+	case http.StatusBadRequest, http.StatusUnsupportedMediaType:
+		mediaType, _, err := mime.ParseMediaType(res.Header.Get("Content-Type"))
+		return err != nil || mediaType != "application/json"
+	}
+	return false
+}
+
+func (c Client) decodeJSON(body io.Reader, v any) error {
+	if c.json == nil {
+		return json.NewDecoder(body).Decode(v)
+	}
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return err
+	}
+	return c.json.Unmarshal(data, v)
 }

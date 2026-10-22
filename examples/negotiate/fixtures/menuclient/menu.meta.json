@@ -1,0 +1,176 @@
+{
+  "serviceName": "menu",
+  "multiArg": false,
+  "help": "",
+  "interfaces": [
+    {
+      "methodName": "decode",
+      "paramNames": null,
+      "methodTimeout": 0,
+      "help": "",
+      "requestTypeDef": {
+        "ref": "BenchMenu"
+      },
+      "responseTypeDef": {}
+    },
+    {
+      "methodName": "encode",
+      "paramNames": null,
+      "methodTimeout": 0,
+      "help": "",
+      "requestTypeDef": {},
+      "responseTypeDef": {
+        "ref": "BenchMenu"
+      }
+    },
+    {
+      "methodName": "small",
+      "paramNames": null,
+      "methodTimeout": 0,
+      "help": "",
+      "requestTypeDef": {
+        "ref": "BenchOption"
+      },
+      "responseTypeDef": {
+        "ref": "BenchOption"
+      }
+    }
+  ],
+  "definitions": {
+    "BenchMenu": {
+      "properties": {
+        "products": {
+          "nullable": true,
+          "elements": {
+            "ref": "BenchProduct"
+          }
+        }
+      }
+    },
+    "BenchOption": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "price": {
+          "type": "int32"
+        }
+      }
+    },
+    "BenchProduct": {
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "options": {
+          "nullable": true,
+          "elements": {
+            "ref": "BenchOption"
+          }
+        },
+        "price": {
+          "type": "int32"
+        },
+        "tags": {
+          "nullable": true,
+          "elements": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Edge": {
+      "properties": {
+        "addr": {
+          "type": "string"
+        },
+        "anything": {},
+        "float32": {
+          "type": "float32"
+        },
+        "float64": {
+          "type": "float64"
+        },
+        "groups": {
+          "nullable": true,
+          "values": {
+            "nullable": true,
+            "elements": {
+              "type": "int32"
+            }
+          }
+        },
+        "hy-phen": {
+          "type": "string"
+        },
+        "matrix": {
+          "nullable": true,
+          "elements": {
+            "nullable": true,
+            "elements": {
+              "type": "int32"
+            }
+          }
+        },
+        "names": {
+          "nullable": true,
+          "elements": {
+            "type": "string"
+          }
+        },
+        "negative": {
+          "type": "int32"
+        },
+        "pointers": {
+          "nullable": true,
+          "elements": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "small": {
+          "type": "int8"
+        },
+        "unsigned": {
+          "type": "uint32"
+        },
+        "when": {
+          "type": "timestamp"
+        }
+      },
+      "optionalProperties": {
+        "optInt": {
+          "type": "int32"
+        },
+        "tree": {
+          "ref": "Node"
+        }
+      }
+    },
+    "Node": {
+      "properties": {
+        "children": {
+          "nullable": true,
+          "elements": {
+            "ref": "Node"
+          }
+        },
+        "name": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
