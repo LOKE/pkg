@@ -1,48 +1,32 @@
-// Package unleash provides a featureflags.Provider backed by an Unleash client
-// with LOKE's custom activation strategies registered.
+// Package unleash adapts an Unleash client to featureflags.Provider and
+// provides LOKE's custom activation strategies.
 package unleash
 
 import (
-	"context"
-	"fmt"
-
 	"github.com/LOKE/pkg/featureflags"
 	unleashsdk "github.com/Unleash/unleash-go-sdk/v5"
 	unleashcontext "github.com/Unleash/unleash-go-sdk/v5/context"
+	"github.com/Unleash/unleash-go-sdk/v5/strategy"
 )
 
-// NewProvider creates an unleash client with all strategies registered, blocks until ready
-// (or ctx is cancelled), and returns the provider and a close function.
-func NewProvider(ctx context.Context, appName, url string) (featureflags.Provider, func() error, error) {
-	client, err := unleashsdk.NewClient(
-		unleashsdk.WithAppName(appName),
-		unleashsdk.WithUrl(url),
-		unleashsdk.WithStrategies(
-			BlacklistOrgWithID{},
-			ClientWithID{},
-			ClientWithIDPrefix{},
-			Currency{},
-			DeviceID{},
-			LocationWithID{},
-			OrgWithID{},
-			Timestamp{},
-			UserWithEmail{},
-		),
-	)
-	if err != nil {
-		return nil, nil, err
+// Strategies returns every custom strategy in this package. Register them all
+// with unleashsdk.WithStrategies: a flag using an unregistered strategy is
+// silently disabled.
+func Strategies() []strategy.Strategy {
+	return []strategy.Strategy{
+		BlacklistOrgWithID{},
+		ClientWithID{},
+		ClientWithIDPrefix{},
+		Currency{},
+		DeviceID{},
+		LocationWithID{},
+		OrgWithID{},
+		Timestamp{},
+		UserWithEmail{},
 	}
-	select {
-	case <-client.Ready():
-	case <-ctx.Done():
-		_ = client.Close()
-		return nil, nil, fmt.Errorf("waiting for unleash: %w", ctx.Err())
-	}
-	return AsProvider(client), client.Close, nil
 }
 
-// AsProvider adapts an existing unleash client. The client must have the
-// strategies its flags use registered.
+// AsProvider adapts client, which should be created with Strategies registered.
 func AsProvider(client *unleashsdk.Client) featureflags.Provider {
 	return resolver{client}
 }
