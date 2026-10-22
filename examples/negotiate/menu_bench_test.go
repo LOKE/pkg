@@ -135,6 +135,8 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 	lokerpc.MountHandlers(kitlog.NewNopLogger(), jsonV2Mux, newBenchmarkMenuService[benchmarkMenu, benchmarkOption](typed, lokerpc.ServeJSON(jsonengines.V2{})))
 	goJSONMux := http.NewServeMux()
 	lokerpc.MountHandlers(kitlog.NewNopLogger(), goJSONMux, newBenchmarkMenuService[benchmarkMenu, benchmarkOption](typed, lokerpc.ServeJSON(jsonengines.GoJSON{})))
+	goJSONOrderedMux := http.NewServeMux()
+	lokerpc.MountHandlers(kitlog.NewNopLogger(), goJSONOrderedMux, newBenchmarkMenuService[benchmarkMenu, benchmarkOption](typed, lokerpc.ServeJSON(jsonengines.GoJSON{OptimizeFieldOrder: true})))
 	// The fixtures types also carry tinylib/msgp generated methods.
 	msgpackMux := http.NewServeMux()
 	lokerpc.MountHandlers(kitlog.NewNopLogger(), msgpackMux, newBenchmarkMenuService[fixtures.BenchMenu, fixtures.BenchOption](generatedMenu, lokerpc.ServeCodecs(msgpackCodec)))
@@ -146,6 +148,7 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 	}
 	legacyServer, negotiatedServer, generatedServer := newServer(legacyMux), newServer(negotiatedMux), newServer(generatedMux)
 	jsonV2Server, goJSONServer, msgpackServer := newServer(jsonV2Mux), newServer(goJSONMux), newServer(msgpackMux)
+	goJSONOrderedServer := newServer(goJSONOrderedMux)
 
 	var httpClients [2]*http.Client
 	for compressed := range 2 {
@@ -229,9 +232,10 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 		{"jsonv2", jsonV2Server.URL, "application/json", "", "", nil, jsonBodies, newPointer[benchmarkMenu], newPointer[benchmarkOption], typed, small, small},
 		{"gojson", goJSONServer.URL, "application/json", "", "", nil, jsonBodies, newPointer[benchmarkMenu], newPointer[benchmarkOption], typed, small, small},
 		{"msgpack", msgpackServer.URL, msgpackCodec.ContentType(), msgpackCodec.ContentType() + ", application/json;q=0.5", "", msgpackCodec, [3][]byte{emptyMsgpack, bodyMsgpack, smallMsgpack}, newPointer[menuclient.Menu], newPointer[menuclient.Option], generatedClientMenu, generatedClientSmall, generatedClientSmall},
+		{"gojson-ordered", goJSONOrderedServer.URL, "application/json", "", "", nil, jsonBodies, newPointer[benchmarkMenu], newPointer[benchmarkOption], typed, small, small},
 	}
 
-	const pathCount = 7
+	const pathCount = 8
 	var clients [2][pathCount]lokerpc.Client
 	for compressed := range 2 {
 		withHTTP := lokerpc.WithHTTPClient(httpClients[compressed])
@@ -242,6 +246,7 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 		clients[compressed][4] = lokerpc.NewClient(jsonV2Server.URL+"/rpc/menu", withHTTP, lokerpc.ClientJSON(jsonengines.V2{}))
 		clients[compressed][5] = lokerpc.NewClient(goJSONServer.URL+"/rpc/menu", withHTTP, lokerpc.ClientJSON(jsonengines.GoJSON{}))
 		clients[compressed][6] = lokerpc.NewClient(msgpackServer.URL+"/rpc/menu", withHTTP, lokerpc.ClientCodecs(msgpackCodec))
+		clients[compressed][7] = lokerpc.NewClient(goJSONOrderedServer.URL+"/rpc/menu", withHTTP, lokerpc.ClientJSON(jsonengines.GoJSON{OptimizeFieldOrder: true}))
 	}
 
 	post := func(path int, method string, requestBody []byte) (*http.Response, error) {
@@ -317,7 +322,7 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 				b.Fatalf("wire %s changed menu: %v", path.name, err)
 			}
 		}
-		b.Logf("wire gzip=%t legacy=%d negotiated-json=%d negotiated-proto=%d generated-proto=%d jsonv2=%d gojson=%d msgpack=%d", compressed == 1, sizes[0], sizes[1], sizes[2], sizes[3], sizes[4], sizes[5], sizes[6])
+		b.Logf("wire gzip=%t legacy=%d negotiated-json=%d negotiated-proto=%d generated-proto=%d jsonv2=%d gojson=%d msgpack=%d gojson-ordered=%d", compressed == 1, sizes[0], sizes[1], sizes[2], sizes[3], sizes[4], sizes[5], sizes[6], sizes[7])
 	}
 
 	// Validate each real client outside the measured blocks.

@@ -95,24 +95,79 @@ Limitations of the generator: map keys must be string kinds, promoted fields thr
 
 ## Benchmark
 
-`BenchmarkMenuNegotiationHTTP` (`menu_bench_test.go`) sends a 200-product menu over loopback HTTP, with and without gzip, through seven paths: `legacy` (service without codecs, plain client), `negotiated-json` (codec server, plain JSON client), `negotiated-proto` (codec server, protobuf client, reflection), `generated-proto` (the same with generated code on both ends), `jsonv2` and `gojson` (the JSON option on both ends, no negotiation) and `msgpack` (negotiated MessagePack, msgp generated code on both ends). It reports `<path>-ms/op` per case, runs the paths in adjacent blocks and reverses their order each `-count` round, and logs wire sizes before timing.
+`BenchmarkMenuNegotiationHTTP` (`menu_bench_test.go`) sends a 200-product menu over loopback HTTP, with and without gzip, through eight paths: `legacy` (service without codecs, plain client), `negotiated-json` (codec server, plain JSON client), `negotiated-proto` (codec server, protobuf client, reflection), `generated-proto` (the same with generated code on both ends), `jsonv2`, `gojson` and `gojson-ordered` (the JSON option on both ends, no negotiation; the last uses go-json's `OptimizeFieldOrder`) and `msgpack` (negotiated MessagePack, msgp generated code on both ends). It reports `<path>-ms/op` per case, runs the paths in adjacent blocks and reverses their order each `-count` round, and logs wire sizes before timing.
 
 Results on an Apple M2 Pro with Go 1.27.2, `-cpu 1 -count 9`, median ms per request. Bold beat legacy in at least 7 of 9 rounds. The Connect proto column is `BenchmarkMenuBridgeHTTP` from the `lokerpc/v2` PR, built with the same Go and run back to back on the same machine.
 
-| Case | Legacy | Negotiated JSON | json/v2 | go-json | Negotiated proto | Generated proto | MessagePack | Connect proto (v2) |
+| Case | Legacy | json/v2 | go-json | go-json ordered | Negotiated proto | Generated proto | MessagePack | Connect proto (v2) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Server, large response | 0.650 | 0.632 | 0.754 | **0.269** | 0.686 | **0.284** | **0.227** | 0.257 |
-| Server, large request | 2.367 | 2.360 | **1.175** | **0.588** | **0.733** | **0.600** | **0.519** | 0.608 |
-| Server, small | 0.041 | 0.043 | 0.041 | 0.040 | 0.043 | 0.042 | 0.041 | 0.047 |
-| End to end, large, gzip off | 2.254 | **2.162** | **1.699** | **0.691** | **1.222** | **0.803** | **0.581** | 0.660 |
-| End to end, large, gzip on | 2.987 | 3.016 | **2.468** | **1.459** | **1.859** | **1.450** | **1.331** | 1.355 |
-| End to end, small | 0.052 | **0.051** | 0.050 | **0.045** | 0.047 | 0.047 | **0.047** | 0.045 |
+| Server, large response | 0.597 | 0.700 | **0.256** | **0.258** | 0.670 | **0.257** | **0.209** | 0.244 |
+| Server, large request | 2.334 | **1.270** | **0.601** | **0.623** | **0.767** | **0.619** | **0.522** | 0.513 |
+| Server, small | 0.041 | 0.043 | 0.042 | 0.042 | 0.043 | 0.042 | 0.044 | 0.041 |
+| End to end, large, gzip off | 2.258 | **1.747** | **0.730** | **0.689** | **1.312** | **0.775** | **0.615** | 0.598 |
+| End to end, large, gzip on | 3.113 | **2.516** | **1.494** | **1.472** | **1.993** | **1.469** | **1.368** | 1.264 |
+| End to end, small | 0.044 | 0.044 | **0.041** | **0.041** | 0.044 | 0.044 | **0.042** | 0.042 |
+
+`negotiated-json` (plain JSON client against a server with codecs) stays within noise of legacy in every case.
 
 Response bytes (gzipped in brackets): JSON 417,905 (5,026), protobuf 365,894 (3,772), MessagePack 391,903 (4,591).
 
-On Go 1.26 the legacy large request took 5.1 ms and end to end 3.4 ms; Go 1.27 runs encoding/json v1 on the v2 engine, which halves the decode cost for free. go-json on both ends, with no wire change and no negotiation, lands level with generated protobuf and Connect. MessagePack with msgp generated code is the fastest path in every large case.
+On Go 1.26 the legacy large request took 5.1 ms and end to end 3.4 ms; Go 1.27 runs encoding/json v1 on the v2 engine, which halves the decode cost for free. go-json on both ends, with no wire change and no negotiation, lands level with generated protobuf and close to Connect. `OptimizeFieldOrder` makes no measurable difference on this fixture, which is mostly strings. MessagePack with msgp generated code is the fastest of ours and level with Connect.
 
 A Cap'n Proto codec was also tried and removed. Unpacked and with a pooled arena it still lost to protobuf on a 200-item round trip (median about 800,000 ns/op against 638,000, and 63,240 wire bytes against 35,666), because go-capnp's schema-less API and the larger payload cost more than the reflection work it saves.
+
+## Node.js
+
+`node/` is the same negotiation for `@loke/http-rpc` servers and `@loke/http-rpc-client` clients, in TypeScript. It speaks the protocol above, so a Node client works against a Go server and a Go client against a Node server. It is a separate package with its own `package-lock.json`; run everything below from `node/` after `npm ci`.
+
+- `src/server.ts` `negotiate(services, { codecs })` is express middleware that goes in front of the unchanged http-rpc handler: `app.use("/rpc", negotiate([service], { codecs }), express.json(), createRequestHandler([service]))`. It answers `OPTIONS`, decodes binary requests into the parsed body so http-rpc validates and dispatches as usual, and replaces `res.json` to encode successful results. Errors are still http-rpc's JSON.
+- `src/client.ts` `NegotiatingClient` extends `RPCClient`. JSON calls go through the stock client. The stock client hard-codes JSON in its fetch call, so binary calls make their own request and reuse its `RpcHTTPError` and `RpcResponseError`; they do not record its Prometheus metrics.
+- `src/protobuf.ts` follows the Go `protocodec` mapping and writes the same bytes. `src/msgpack.ts` wraps `@msgpack/msgpack` and carries timestamps as the MessagePack timestamp extension and `float32` properties as float32, as Go requires.
+- Values are the JSON-shaped objects http-rpc already handles: timestamps are RFC 3339 strings and integers are numbers.
+
+Differences from the Go side:
+
+- An absent required list or map decodes as `[]` or `{}` even when its schema is nullable, since the wire cannot tell nil from empty. Other absent required properties decode as their zero value (`null` if nullable), and absent optional properties stay absent.
+- Timestamps decode in UTC, and `float32` values decode as the nearest float64.
+- `any` and discriminator values are carried as `JSON.stringify` output, so object key order is not sorted as Go's is.
+- Go carries `netip.Addr` over MessagePack as raw bytes, but its schema says string, so Node receives a `Uint8Array` and a Go client's `netip.Addr` fails Node's validation. Protobuf is unaffected.
+- Go's reflection MessagePack decoder returns `time.Time` in the local zone, so JSON re-encoded from it carries an offset. The instant is the same.
+- A Go zero-valued `encoding.TextMarshaler` field is written as an empty field; Node omits an empty string.
+
+Tests build the Go example with `mise exec go@1.27.2 -- go build` (set `GO="go"` to use another toolchain) and run it as a server and as a client, so they need Go 1.27 on the path:
+
+```
+npm test
+```
+
+They check that the TypeScript protobuf bytes are identical to Go's for the menu fixtures and the edge values in `interop.go`, that Node and Go clients and servers negotiate protobuf and MessagePack with each other and return the same values as JSON, and the fallbacks: old server, changed schema (412), mixed fleet (non-JSON 400 or 415), unreachable server, and errors staying JSON.
+
+`go run . serve [-plain]`, `dump` and `call` in `interop.go` are what the tests drive.
+
+The benchmark mirrors the `lokerpc/v2` PR's TypeScript benchmark of http-rpc against Connect: the same 200-product, 600-choice menu (about 424 KB as JSON), cases, rounds, gzip handling and JSON output (a summary table goes to stderr). Its paths are `legacy` (plain http-rpc and `RPCClient`), `negotiated-json` (negotiating server, plain client), `negotiated-proto` and `msgpack`.
+
+```
+mise exec node@26 -- node --import tsx bench/menu.ts > node.json
+bun bench/menu.ts > bun.json
+BENCH_WARMUP=2 BENCH_ITERATIONS=3 BENCH_ROUNDS=2 bun bench/menu.ts   # smoke run
+```
+
+Run with Node v26.12.1 and Bun 1.4.2. `BENCH_WARMUP`, `BENCH_ITERATIONS` and `BENCH_ROUNDS` default to 30, 100 and 9.
+
+Results on an Apple M2 Pro, default knobs, median ms per request. The Connect columns are the `lokerpc/v2` PR's TypeScript benchmark run back to back on the same machine; its legacy numbers match ours within noise.
+
+| Case | Node legacy | Node negotiated proto | Node MessagePack | Node Connect proto | Bun legacy | Bun negotiated proto | Bun MessagePack | Bun Connect proto |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Server, large response | 1.035 | 1.184 | 2.368 | 3.650 | 0.718 | 1.005 | 1.429 | 2.600 |
+| Server, large request | 1.015 | 1.298 | 1.351 | 2.195 | 0.894 | 0.860 | 1.535 | 2.200 |
+| Server, small | 0.110 | 0.121 | 0.118 | 0.134 | 0.102 | 0.103 | 0.088 | 0.129 |
+| End to end, large, gzip off | 1.846 | 2.381 | 3.319 | 5.851 | 1.155 | 1.555 | 2.594 | 4.835 |
+| End to end, large, gzip on | 3.193 | 3.305 | 4.569 | 6.766 | 1.406 | 1.728 | 2.800 | 5.848 |
+| End to end, small | 0.198 | 0.199 | 0.200 | 0.186 | 0.118 | 0.112 | 0.112 | 0.156 |
+
+Response bytes: JSON 423,734, protobuf 300,304, MessagePack 383,368.
+
+Native `JSON.parse` and `JSON.stringify` beat every binary codec in JS, so JS services and clients should stay on JSON. The JTD-driven protobuf codec is still 1.7 to 3x faster than Connect's generated protobuf on large messages, and negotiation means a Go client can talk protobuf to a Node server that opted in while JS callers keep JSON.
 
 ## Limitations
 

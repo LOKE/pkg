@@ -1,7 +1,9 @@
 package jsonengines_test
 
 import (
+	"bytes"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/LOKE/pkg/examples/negotiate/jsonengines"
@@ -86,4 +88,72 @@ func TestSemantics(t *testing.T) {
 			}
 		})
 	}
+}
+
+type mixed struct {
+	Name   string            `json:"name"`
+	Count  int               `json:"count"`
+	Label  string            `json:"label"`
+	Ratio  float64           `json:"ratio"`
+	On     bool              `json:"on"`
+	Tags   []string          `json:"tags"`
+	Fields map[string]string `json:"fields"`
+	Child  *mixed            `json:"child,omitempty"`
+}
+
+// TestOptimizedFieldOrder checks the option changes member order only.
+func TestOptimizedFieldOrder(t *testing.T) {
+	plain, ordered := jsonengines.GoJSON{}, jsonengines.GoJSON{OptimizeFieldOrder: true}
+
+	tests := []struct {
+		name  string
+		value mixed
+	}{
+		{"zero value", mixed{}},
+		{"interleaved kinds", mixed{Name: "a", Count: 2, Label: "b", Ratio: 1.5, On: true, Tags: []string{"x", "y"}, Fields: map[string]string{"k": "v"}}},
+		{"nested", mixed{Name: "outer", Count: 1, Child: &mixed{Name: "inner", Label: "l", Count: -4}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plainBytes, err := plain.Marshal(tt.value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			orderedBytes, err := ordered.Marshal(tt.value)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var plainTree, orderedTree any
+			err = json.Unmarshal(plainBytes, &plainTree)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = json.Unmarshal(orderedBytes, &orderedTree)
+			if err != nil {
+				t.Fatalf("ordered output is not JSON: %v\n%s", err, orderedBytes)
+			}
+			if !reflect.DeepEqual(plainTree, orderedTree) {
+				t.Errorf("same members expected\nplain:   %s\nordered: %s", plainBytes, orderedBytes)
+			}
+
+			var decoded mixed
+			err = ordered.Unmarshal(orderedBytes, &decoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(tt.value, decoded) {
+				t.Errorf("round trip changed value: %+v != %+v", tt.value, decoded)
+			}
+		})
+	}
+
+	t.Run("order differs for interleaved kinds", func(t *testing.T) {
+		value := tests[1].value
+		plainBytes, _ := plain.Marshal(value)
+		orderedBytes, _ := ordered.Marshal(value)
+		if bytes.Equal(plainBytes, orderedBytes) {
+			t.Errorf("expected a different member order, both gave %s", plainBytes)
+		}
+	})
 }

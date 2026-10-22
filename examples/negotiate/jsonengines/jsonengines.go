@@ -16,8 +16,17 @@ func (V2) Marshal(v any) ([]byte, error) { return jsonv2.Marshal(v) }
 func (V2) Unmarshal(data []byte, v any) error { return jsonv2.Unmarshal(data, v) }
 
 // GoJSON is github.com/goccy/go-json, which follows encoding/json v1 semantics.
-type GoJSON struct{}
+type GoJSON struct {
+	// OptimizeFieldOrder lets the encoder group struct fields by kind for speed.
+	// The members are the same but their order differs from the struct's.
+	OptimizeFieldOrder bool
+}
 
-func (GoJSON) Marshal(v any) ([]byte, error) { return gojson.Marshal(v) }
+func (g GoJSON) Marshal(v any) ([]byte, error) {
+	if g.OptimizeFieldOrder {
+		return gojson.MarshalWithOption(v, gojson.OptimizeFieldOrder())
+	}
+	return gojson.Marshal(v)
+}
 
 func (GoJSON) Unmarshal(data []byte, v any) error { return gojson.Unmarshal(data, v) }

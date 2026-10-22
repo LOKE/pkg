@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 
 	"github.com/LOKE/pkg/examples/negotiate/protocodec"
 	"github.com/LOKE/pkg/lokerpc"
@@ -21,6 +22,13 @@ func mountServer(service *lokerpc.Service) *httptest.Server {
 }
 
 func main() {
+	if len(os.Args) > 1 {
+		if err := runInterop(os.Args[1:]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
 	proto := protocodec.New()
 
 	newCodecServer := mountServer(newMenuService(proto))
