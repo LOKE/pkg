@@ -1,0 +1,357 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"math"
+	"net/http"
+	"os"
+	"reflect"
+	"strconv"
+	"sync/atomic"
+	"testing"
+
+	"github.com/LOKE/pkg/examples/negotiate/codecutil"
+	"github.com/LOKE/pkg/examples/negotiate/fixtures"
+	"github.com/LOKE/pkg/examples/negotiate/fixtures/menuclient"
+	"github.com/LOKE/pkg/examples/negotiate/protocodec"
+	"github.com/LOKE/pkg/lokerpc"
+	"github.com/google/go-cmp/cmp"
+	jtd "github.com/jsontypedef/json-typedef-go"
+	"google.golang.org/protobuf/encoding/protowire"
+)
+
+// Same data and layout as the generated types, without their methods, so the
+// reflection codec handles them.
+type (
+	plainEdge         fixtures.Edge
+	plainMenu         fixtures.BenchMenu
+	plainOption       fixtures.BenchOption
+	plainClientMenu   menuclient.Menu
+	plainClientOption menuclient.Option
+)
+
+func schemaOf(t *testing.T, goType reflect.Type) (*jtd.Schema, map[string]jtd.Schema) {
+	t.Helper()
+	typeDefs := map[reflect.Type]*lokerpc.NamedSchema{}
+	schema := lokerpc.TypeSchema(goType, typeDefs)
+	defs := lokerpc.TypeDefs(typeDefs)
+
+	encoded, err := json.Marshal(struct {
+		Schema jtd.Schema
+		Defs   map[string]jtd.Schema
+	}{*schema, defs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		Schema jtd.Schema
+		Defs   map[string]jtd.Schema
+	}
+	err = json.Unmarshal(encoded, &wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &wire.Schema, wire.Defs
+}
+
+func clientSchemaOf(t *testing.T, method string) (*jtd.Schema, map[string]jtd.Schema) {
+	t.Helper()
+	data, err := os.ReadFile("fixtures/menuclient/menu.meta.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var meta lokerpc.Meta
+	err = json.Unmarshal(data, &meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, endpoint := range meta.Interfaces {
+		if endpoint.MethodName == method {
+			return endpoint.RequestTypeDef, meta.Definitions
+		}
+	}
+	t.Fatalf("meta file has no %s endpoint", method)
+	return nil, nil
+}
+
+// generatedPair is one generated value together with the plain type the
+// reflection codec encodes it as.
+type generatedPair struct {
+	name      string
+	schema    *jtd.Schema
+	defs      map[string]jtd.Schema
+	value     protocodec.Marshaler
+	plainType reflect.Type
+}
+
+func (p generatedPair) plainValue() any {
+	return reflect.ValueOf(p.value).Convert(p.plainType).Interface()
+}
+
+func (p generatedPair) newGenerated() protocodec.Unmarshaler {
+	return reflect.New(reflect.TypeOf(p.value)).Interface().(protocodec.Unmarshaler)
+}
+
+func (p generatedPair) decodeGenerated(data []byte) (any, error) {
+	target := p.newGenerated()
+	err := target.UnmarshalProto(data)
+	return reflect.ValueOf(target).Elem().Interface(), err
+}
+
+func (p generatedPair) decodeReflection(data []byte) (any, error) {
+	target := reflect.New(p.plainType)
+	err := protocodec.New().Unmarshal(data, target.Interface(), p.schema, p.defs)
+	return target.Elem().Convert(reflect.TypeOf(p.value)).Interface(), err
+}
+
+func generatedPairs(t *testing.T) []generatedPair {
+	edgeSchema, edgeDefs := schemaOf(t, reflect.TypeFor[fixtures.Edge]())
+	menuSchema, menuDefs := schemaOf(t, reflect.TypeFor[fixtures.BenchMenu]())
+	optionSchema, optionDefs := schemaOf(t, reflect.TypeFor[fixtures.BenchOption]())
+	clientMenuSchema, clientDefs := clientSchemaOf(t, "decode")
+	clientOptionSchema, _ := clientSchemaOf(t, "small")
+
+	var pairs []generatedPair
+	for _, tt := range edgeTests {
+		pairs = append(pairs, generatedPair{"edge/" + tt.name, edgeSchema, edgeDefs, tt.edge, reflect.TypeFor[plainEdge]()})
+	}
+
+	large := fixtures.LargeMenu()
+	var clientLarge menuclient.Menu
+	encoded, err := json.Marshal(large)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = json.Unmarshal(encoded, &clientLarge)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return append(pairs,
+		generatedPair{"menu/large", menuSchema, menuDefs, large, reflect.TypeFor[plainMenu]()},
+		generatedPair{"menu/empty", menuSchema, menuDefs, fixtures.BenchMenu{}, reflect.TypeFor[plainMenu]()},
+		generatedPair{"option/small", optionSchema, optionDefs, fixtures.BenchOption{ID: "small", Name: "tiny", Price: 42}, reflect.TypeFor[plainOption]()},
+		generatedPair{"option/zero", optionSchema, optionDefs, fixtures.BenchOption{}, reflect.TypeFor[plainOption]()},
+		generatedPair{"client menu/large", clientMenuSchema, clientDefs, clientLarge, reflect.TypeFor[plainClientMenu]()},
+		generatedPair{"client option/small", clientOptionSchema, clientDefs, menuclient.Option{ID: "small", Name: "tiny", Price: 42}, reflect.TypeFor[plainClientOption]()},
+	)
+}
+
+func TestGeneratedMatchesReflection(t *testing.T) {
+	for _, pair := range generatedPairs(t) {
+		t.Run(pair.name, func(t *testing.T) {
+			generatedBytes, err := pair.value.MarshalProto()
+			if err != nil {
+				t.Fatal(err)
+			}
+			reflectionBytes, err := protocodec.New().Marshal(pair.plainValue(), pair.schema, pair.defs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if diff := cmp.Diff(reflectionBytes, generatedBytes); diff != "" {
+				t.Fatalf("generated bytes differ from reflection (-reflection +generated):\n%s", diff)
+			}
+
+			viaGenerated, err := pair.decodeGenerated(reflectionBytes)
+			if err != nil {
+				t.Fatalf("generated decode of reflection bytes: %v", err)
+			}
+			viaReflection, err := pair.decodeReflection(generatedBytes)
+			if err != nil {
+				t.Fatalf("reflection decode of generated bytes: %v", err)
+			}
+			for name, got := range map[string]any{"generated": viaGenerated, "reflection": viaReflection} {
+				if diff := cmp.Diff(pair.value, got, compareOpts); diff != "" {
+					t.Errorf("%s decode mismatch (-want +got):\n%s", name, diff)
+				}
+			}
+
+			// The codec itself must pick the generated code and agree with it.
+			viaCodec, err := protocodec.New().Marshal(pair.value, pair.schema, pair.defs)
+			if err != nil || !reflect.DeepEqual(viaCodec, generatedBytes) {
+				t.Errorf("codec output differs from generated output: %v", err)
+			}
+		})
+	}
+}
+
+func TestGeneratedBadInput(t *testing.T) {
+	var edgePair generatedPair
+	for _, pair := range generatedPairs(t) {
+		if pair.name == "edge/time with zone and nanos" {
+			edgePair = pair
+		}
+	}
+	full := fixtures.Edge{
+		OptInt: new(7), Negative: -5, Small: -3, Unsigned: 9, Float32: 1.5, Float64: -2.5,
+		Names: []string{"a", "bb"}, Pointers: []*string{new("p"), nil}, Matrix: [][]int{{1}, {2, 3}},
+		Groups: map[string][]int{"k": {1, 2}}, Tree: &fixtures.Node{Name: "root", Children: []fixtures.Node{{Name: "leaf"}}},
+		When: edgePair.value.(fixtures.Edge).When, Anything: map[string]any{"x": 1.0}, Hyphenated: "h",
+	}
+	edgePair.value = full
+	valid, err := full.MarshalProto()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Edge's properties live in a def, so look the field up there.
+	edgeDef := edgePair.defs[*edgePair.schema.Ref]
+	numberOf := func(name string) protowire.Number {
+		for i, prop := range codecutil.Properties(&edgeDef) {
+			if prop.Name == name {
+				return protowire.Number(i + 1)
+			}
+		}
+		t.Fatalf("no property %s", name)
+		return 0
+	}
+	envelope := func(field []byte) []byte {
+		body := protowire.AppendBytes(nil, field)
+		return append(protowire.AppendTag(nil, 1, protowire.BytesType), body...)
+	}
+	field := func(num protowire.Number, wireType protowire.Type, payload []byte) []byte {
+		return append(protowire.AppendTag(nil, num, wireType), payload...)
+	}
+
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{"garbage", []byte("\xff\xff\xffgarbage\x00\x01")},
+		{"envelope as varint", []byte{0x08, 0x01}},
+		{"envelope length beyond data", []byte{0x0a, 0x7f, 0x01}},
+		{"string field as varint", envelope(field(numberOf("hy-phen"), protowire.VarintType, []byte{0x01}))},
+		{"varint field as bytes", envelope(field(numberOf("negative"), protowire.BytesType, protowire.AppendBytes(nil, []byte("x"))))},
+		{"float field as varint", envelope(field(numberOf("float64"), protowire.VarintType, []byte{0x01}))},
+		{"int8 overflow", envelope(field(numberOf("small"), protowire.VarintType, protowire.AppendVarint(nil, protowire.EncodeZigZag(300))))},
+		{"uint32 overflow", envelope(field(numberOf("unsigned"), protowire.VarintType, protowire.AppendVarint(nil, 1<<33)))},
+		{"uint32 beyond int64", envelope(field(numberOf("unsigned"), protowire.VarintType, protowire.AppendVarint(nil, math.MaxUint64)))},
+		{"timestamp as varint", envelope(field(numberOf("when"), protowire.VarintType, []byte{0x01}))},
+		{"timestamp with bytes seconds", envelope(field(numberOf("when"), protowire.BytesType, protowire.AppendBytes(nil, field(1, protowire.BytesType, protowire.AppendBytes(nil, []byte("x"))))))},
+		{"invalid JSON field", envelope(field(numberOf("anything"), protowire.BytesType, protowire.AppendBytes(nil, []byte("{nope"))))},
+		{"invalid text field", envelope(field(numberOf("addr"), protowire.BytesType, protowire.AppendBytes(nil, []byte("not an address"))))},
+		{"packed list cut mid varint", envelope(field(numberOf("matrix"), protowire.BytesType, protowire.AppendBytes(nil, field(1, protowire.BytesType, protowire.AppendBytes(nil, []byte{0x80})))))},
+		{"map entry key as varint", envelope(field(numberOf("groups"), protowire.BytesType, protowire.AppendBytes(nil, field(1, protowire.VarintType, []byte{0x01}))))},
+		{"unknown fields are skipped", envelope(append(field(999, protowire.VarintType, []byte{0x01}), field(998, protowire.BytesType, protowire.AppendBytes(nil, []byte("skip")))...))},
+	}
+	for length := range len(valid) {
+		tests = append(tests, struct {
+			name string
+			data []byte
+		}{"truncated to " + strconv.Itoa(length), valid[:length]})
+	}
+	for index := range len(valid) {
+		flipped := append([]byte(nil), valid...)
+		flipped[index] ^= 0xff
+		tests = append(tests, struct {
+			name string
+			data []byte
+		}{"flipped byte " + strconv.Itoa(index), flipped})
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			viaGenerated, generatedErr := edgePair.decodeGenerated(tt.data)
+			viaReflection, reflectionErr := edgePair.decodeReflection(tt.data)
+			if (generatedErr != nil) != (reflectionErr != nil) {
+				t.Fatalf("generated error = %v, reflection error = %v", generatedErr, reflectionErr)
+			}
+			if generatedErr == nil {
+				if diff := cmp.Diff(viaReflection, viaGenerated, compareOpts); diff != "" {
+					t.Errorf("decoded values differ (-reflection +generated):\n%s", diff)
+				}
+			}
+		})
+	}
+
+	t.Run("int overflow on encode", func(t *testing.T) {
+		_, generatedErr := fixtures.Edge{Negative: math.MaxInt32 + 1}.MarshalProto()
+		_, reflectionErr := protocodec.New().Marshal(plainEdge{Negative: math.MaxInt32 + 1}, edgePair.schema, edgePair.defs)
+		if generatedErr == nil || reflectionErr == nil {
+			t.Errorf("want overflow errors, got generated=%v reflection=%v", generatedErr, reflectionErr)
+		}
+	})
+}
+
+type countedThing struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+type plainThing countedThing
+
+var (
+	thingCalls       atomic.Int32
+	thingSchema      *jtd.Schema
+	thingDefs        map[string]jtd.Schema
+	thingFingerprint string
+)
+
+// countedThing stands in for code generated against thingV1's schema; it
+// counts calls so tests can see whether the codec took the generated path.
+func (countedThing) ProtoFingerprint() string { return thingFingerprint }
+
+func (v countedThing) MarshalProto() ([]byte, error) {
+	thingCalls.Add(1)
+	return protocodec.New().Marshal(plainThing(v), thingSchema, thingDefs)
+}
+
+func (v *countedThing) UnmarshalProto(data []byte) error {
+	thingCalls.Add(1)
+	return protocodec.New().Unmarshal(data, (*plainThing)(v), thingSchema, thingDefs)
+}
+
+func TestGeneratedFallsBackOnSchemaMismatch(t *testing.T) {
+	thingSchema, thingDefs = schemaOf(t, reflect.TypeFor[thingV1]())
+	var err error
+	thingFingerprint, err = protocodec.Fingerprint(thingSchema, thingDefs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	service := func(echo lokerpc.EndpointCodec) *lokerpc.Service {
+		return lokerpc.NewService("thing", "", lokerpc.EndpointCodecMap{"echo": echo}, lokerpc.ServeCodecs(protocodec.New()))
+	}
+	tests := []struct {
+		name      string
+		service   *lokerpc.Service
+		wantCalls int32
+	}{
+		{"server on the generated schema", service(lokerpc.MakeStandardEndpointCodec(func(_ context.Context, in thingV1) (thingV1, error) {
+			return in, nil
+		}, "")), 2},
+		{"server schema has an extra field", service(lokerpc.MakeStandardEndpointCodec(func(_ context.Context, in thingV2) (thingV2, error) {
+			return thingV2{ID: in.ID, Name: in.Name, Extra: "new"}, nil
+		}, "")), 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := serveService(t, tt.service)
+			client, recorder := newRecordedClient(server.URL+"/rpc/thing", protocodec.New())
+
+			thingCalls.Store(0)
+			args := countedThing{ID: 7, Name: "seven"}
+			var got countedThing
+			err := client.DoRequest(context.Background(), "echo", args, &got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if diff := cmp.Diff(args, got); diff != "" {
+				t.Errorf("mismatch (-want +got):\n%s", diff)
+			}
+
+			if calls := thingCalls.Load(); calls != tt.wantCalls {
+				t.Errorf("generated code calls = %d, want %d", calls, tt.wantCalls)
+			}
+			for _, exchange := range recorder.Take() {
+				if exchange.Status == http.StatusPreconditionFailed {
+					t.Errorf("unexpected 412: %+v", exchange)
+				}
+				if exchange.Method == http.MethodPost && exchange.RequestType != protocodec.New().ContentType() {
+					t.Errorf("request was not protobuf: %+v", exchange)
+				}
+			}
+		})
+	}
+}

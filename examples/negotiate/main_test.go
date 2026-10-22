@@ -15,35 +15,13 @@ import (
 	"time"
 
 	"github.com/LOKE/pkg/errors"
+	"github.com/LOKE/pkg/examples/negotiate/fixtures"
 	"github.com/LOKE/pkg/examples/negotiate/protocodec"
 	"github.com/LOKE/pkg/lokerpc"
 	kitlog "github.com/go-kit/log"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
-
-type Node struct {
-	Name     string `json:"name"`
-	Children []Node `json:"children"`
-}
-
-type Edge struct {
-	OptInt     *int             `json:"optInt,omitempty"`
-	Negative   int              `json:"negative"`
-	Small      int8             `json:"small"`
-	Unsigned   uint32           `json:"unsigned"`
-	Float32    float32          `json:"float32"`
-	Float64    float64          `json:"float64"`
-	Names      []string         `json:"names"`
-	Pointers   []*string        `json:"pointers"`
-	Matrix     [][]int          `json:"matrix"`
-	Groups     map[string][]int `json:"groups"`
-	Tree       *Node            `json:"tree,omitempty"`
-	When       time.Time        `json:"when"`
-	Anything   any              `json:"anything"`
-	Hyphenated string           `json:"hy-phen"`
-	Addr       netip.Addr       `json:"addr"`
-}
 
 type etagStripper struct {
 	http.ResponseWriter
@@ -159,6 +137,47 @@ type itemServer struct {
 type itemRequestServer struct {
 	ID   int    `json:"id"`
 	Note string `json:"note"`
+}
+
+var utcPlus10 = time.FixedZone("UTC+10", 10*60*60)
+
+var edgeTests = []struct {
+	name  string
+	edge  fixtures.Edge
+	check func(t *testing.T, got fixtures.Edge)
+}{
+	{name: "zero value"},
+	{name: "optional int absent", edge: fixtures.Edge{Negative: 1}, check: func(t *testing.T, got fixtures.Edge) {
+		if got.OptInt != nil {
+			t.Errorf("OptInt = %d, want nil", *got.OptInt)
+		}
+	}},
+	{name: "optional int pointer to zero", edge: fixtures.Edge{OptInt: new(0)}, check: func(t *testing.T, got fixtures.Edge) {
+		if got.OptInt == nil || *got.OptInt != 0 {
+			t.Errorf("OptInt = %v, want pointer to 0", got.OptInt)
+		}
+	}},
+	{name: "negative and extreme ints", edge: fixtures.Edge{OptInt: new(math.MinInt32), Negative: math.MinInt32, Small: -128, Unsigned: math.MaxUint32}},
+	{name: "positive extremes", edge: fixtures.Edge{OptInt: new(math.MaxInt32), Negative: math.MaxInt32, Small: 127}},
+	{name: "floats", edge: fixtures.Edge{Float32: -1.5, Float64: math.SmallestNonzeroFloat64}},
+	{name: "nested slices", edge: fixtures.Edge{Matrix: [][]int{{1, 2}, {}, {3, -4}}}},
+	{name: "nullable elements", edge: fixtures.Edge{Pointers: []*string{new("a"), nil, new("")}}, check: func(t *testing.T, got fixtures.Edge) {
+		if len(got.Pointers) != 3 || got.Pointers[1] != nil || got.Pointers[2] == nil {
+			t.Errorf("Pointers = %v, want [a nil ptr-to-empty]", got.Pointers)
+		}
+	}},
+	{name: "map of slices", edge: fixtures.Edge{Groups: map[string][]int{"a": {1, 2}, "b": {-1}, "": {0}}}},
+	{name: "recursive tree", edge: fixtures.Edge{Tree: &fixtures.Node{Name: "root", Children: []fixtures.Node{{Name: "a", Children: []fixtures.Node{{Name: "a1"}}}, {Name: "b"}}}}},
+	{name: "time with zone and nanos", edge: fixtures.Edge{When: time.Date(2026, 7, 8, 9, 10, 11, 123456789, utcPlus10)}},
+	{name: "time before the epoch", edge: fixtures.Edge{When: time.Date(1901, 2, 3, 4, 5, 6, 7, time.UTC)}},
+	{name: "any field", edge: fixtures.Edge{Anything: map[string]any{"k": []any{1.0, "two", nil, true}}}},
+	{name: "hyphenated key and unicode", edge: fixtures.Edge{Hyphenated: "ünï-☃-\x00"}},
+	{name: "text marshaler", edge: fixtures.Edge{Addr: netip.MustParseAddr("2001:db8::1")}},
+	{name: "empty slices and maps", edge: fixtures.Edge{Names: []string{}, Matrix: [][]int{}, Groups: map[string][]int{}}, check: func(t *testing.T, got fixtures.Edge) {
+		if got.Names != nil || got.Matrix != nil || got.Groups != nil {
+			t.Errorf("want empty containers to decode as nil, got %#v %#v %#v", got.Names, got.Matrix, got.Groups)
+		}
+	}},
 }
 
 func TestNegotiation(t *testing.T) {
@@ -607,56 +626,16 @@ func TestNegotiation(t *testing.T) {
 		}},
 		{"edge values round-trip like JSON", func(t *testing.T, tc testCodec) {
 			service := lokerpc.NewService("edge", "", lokerpc.EndpointCodecMap{
-				"echo": lokerpc.MakeStandardEndpointCodec(func(_ context.Context, in Edge) (Edge, error) { return in, nil }, ""),
+				"echo": lokerpc.MakeStandardEndpointCodec(func(_ context.Context, in fixtures.Edge) (fixtures.Edge, error) { return in, nil }, ""),
 			}, lokerpc.ServeCodecs(tc.codec))
 			server := serveService(t, service)
-
-			utcPlus10 := time.FixedZone("UTC+10", 10*60*60)
-			tests := []struct {
-				name  string
-				edge  Edge
-				check func(t *testing.T, got Edge)
-			}{
-				{name: "zero value"},
-				{name: "optional int absent", edge: Edge{Negative: 1}, check: func(t *testing.T, got Edge) {
-					if got.OptInt != nil {
-						t.Errorf("OptInt = %d, want nil", *got.OptInt)
-					}
-				}},
-				{name: "optional int pointer to zero", edge: Edge{OptInt: new(0)}, check: func(t *testing.T, got Edge) {
-					if got.OptInt == nil || *got.OptInt != 0 {
-						t.Errorf("OptInt = %v, want pointer to 0", got.OptInt)
-					}
-				}},
-				{name: "negative and extreme ints", edge: Edge{OptInt: new(math.MinInt32), Negative: math.MinInt32, Small: -128, Unsigned: math.MaxUint32}},
-				{name: "positive extremes", edge: Edge{OptInt: new(math.MaxInt32), Negative: math.MaxInt32, Small: 127}},
-				{name: "floats", edge: Edge{Float32: -1.5, Float64: math.SmallestNonzeroFloat64}},
-				{name: "nested slices", edge: Edge{Matrix: [][]int{{1, 2}, {}, {3, -4}}}},
-				{name: "nullable elements", edge: Edge{Pointers: []*string{new("a"), nil, new("")}}, check: func(t *testing.T, got Edge) {
-					if len(got.Pointers) != 3 || got.Pointers[1] != nil || got.Pointers[2] == nil {
-						t.Errorf("Pointers = %v, want [a nil ptr-to-empty]", got.Pointers)
-					}
-				}},
-				{name: "map of slices", edge: Edge{Groups: map[string][]int{"a": {1, 2}, "b": {-1}, "": {0}}}},
-				{name: "recursive tree", edge: Edge{Tree: &Node{Name: "root", Children: []Node{{Name: "a", Children: []Node{{Name: "a1"}}}, {Name: "b"}}}}},
-				{name: "time with zone and nanos", edge: Edge{When: time.Date(2026, 7, 8, 9, 10, 11, 123456789, utcPlus10)}},
-				{name: "time before the epoch", edge: Edge{When: time.Date(1901, 2, 3, 4, 5, 6, 7, time.UTC)}},
-				{name: "any field", edge: Edge{Anything: map[string]any{"k": []any{1.0, "two", nil, true}}}},
-				{name: "hyphenated key and unicode", edge: Edge{Hyphenated: "ünï-☃-\x00"}},
-				{name: "text marshaler", edge: Edge{Addr: netip.MustParseAddr("2001:db8::1")}},
-				{name: "empty slices and maps", edge: Edge{Names: []string{}, Matrix: [][]int{}, Groups: map[string][]int{}}, check: func(t *testing.T, got Edge) {
-					if got.Names != nil || got.Matrix != nil || got.Groups != nil {
-						t.Errorf("want empty containers to decode as nil, got %#v %#v %#v", got.Names, got.Matrix, got.Groups)
-					}
-				}},
-			}
 
 			jsonClient, _ := newRecordedClient(server.URL + "/rpc/edge")
 			binaryClient, recorder := newRecordedClient(server.URL+"/rpc/edge", tc.codec)
 
-			for _, tt := range tests {
+			for _, tt := range edgeTests {
 				t.Run(tt.name, func(t *testing.T) {
-					var viaJSON, viaBinary Edge
+					var viaJSON, viaBinary fixtures.Edge
 					mustDo(t, jsonClient, "echo", tt.edge, &viaJSON)
 					mustDo(t, binaryClient, "echo", tt.edge, &viaBinary)
 
@@ -692,8 +671,8 @@ func TestNegotiation(t *testing.T) {
 
 			t.Run("int overflow is an error", func(t *testing.T) {
 				recorder.Take()
-				var res Edge
-				err := binaryClient.DoRequest(context.Background(), "echo", Edge{Negative: math.MaxInt32 + 1}, &res)
+				var res fixtures.Edge
+				err := binaryClient.DoRequest(context.Background(), "echo", fixtures.Edge{Negative: math.MaxInt32 + 1}, &res)
 				if err == nil {
 					t.Fatal("want overflow error, got nil")
 				}

@@ -218,14 +218,19 @@ func IntForSchema(v reflect.Value, schemaType jtd.Type) (int64, error) {
 		return 0, fmt.Errorf("cannot encode %s as %s", v.Type(), schemaType)
 	}
 
+	return n, CheckInt(n, schemaType)
+}
+
+// CheckInt returns an error unless n fits the JTD integer type.
+func CheckInt(n int64, schemaType jtd.Type) error {
 	low, high, ok := intBounds(schemaType)
 	if !ok {
-		return 0, fmt.Errorf("%s is not an integer type", schemaType)
+		return fmt.Errorf("%s is not an integer type", schemaType)
 	}
 	if n < low || n > high {
-		return 0, fmt.Errorf("value %d out of range for %s", n, schemaType)
+		return fmt.Errorf("value %d out of range for %s", n, schemaType)
 	}
-	return n, nil
+	return nil
 }
 
 // SetInt stores n into a Go integer, failing if it overflows that type.

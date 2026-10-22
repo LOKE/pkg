@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LOKE/pkg/examples/negotiate/fixtures"
+	"github.com/LOKE/pkg/examples/negotiate/fixtures/menuclient"
 	"github.com/LOKE/pkg/examples/negotiate/protocodec"
 	"github.com/LOKE/pkg/lokerpc"
 	kitlog "github.com/go-kit/log"
@@ -88,15 +90,19 @@ func benchmarkLegacyGzip(handler http.Handler) http.Handler {
 	})
 }
 
-func newBenchmarkMenuService(menu benchmarkMenu, opts ...lokerpc.ServiceOption) *lokerpc.Service {
+func newPointer[T any]() any {
+	return new(T)
+}
+
+func newBenchmarkMenuService[Menu, Option any](menu Menu, opts ...lokerpc.ServiceOption) *lokerpc.Service {
 	return lokerpc.NewService("menu", "benchmark", lokerpc.EndpointCodecMap{
-		"encode": lokerpc.MakeStandardEndpointCodec(func(context.Context, struct{}) (benchmarkMenu, error) { return menu, nil }, "encode"),
-		"decode": lokerpc.MakeStandardEndpointCodec(func(context.Context, benchmarkMenu) (struct{}, error) { return struct{}{}, nil }, "decode"),
-		"small":  lokerpc.MakeStandardEndpointCodec(func(_ context.Context, request benchmarkOption) (benchmarkOption, error) { return request, nil }, "small"),
+		"encode": lokerpc.MakeStandardEndpointCodec(func(context.Context, struct{}) (Menu, error) { return menu, nil }, "encode"),
+		"decode": lokerpc.MakeStandardEndpointCodec(func(context.Context, Menu) (struct{}, error) { return struct{}{}, nil }, "decode"),
+		"small":  lokerpc.MakeStandardEndpointCodec(func(_ context.Context, request Option) (Option, error) { return request, nil }, "small"),
 	}, opts...)
 }
 
-// Each round times three adjacent per-path blocks, reversing their order between
+// Each round times four adjacent per-path blocks, reversing their order between
 // -count rounds. All cases use loopback HTTP. Server-only calls drain responses
 // without parsing; round trips use the real clients.
 func BenchmarkMenuNegotiationHTTP(b *testing.B) {
@@ -113,13 +119,20 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 	}
 
 	legacyMux := http.NewServeMux()
-	lokerpc.MountHandlers(kitlog.NewNopLogger(), legacyMux, newBenchmarkMenuService(typed))
+	lokerpc.MountHandlers(kitlog.NewNopLogger(), legacyMux, newBenchmarkMenuService[benchmarkMenu, benchmarkOption](typed))
 	negotiatedMux := http.NewServeMux()
-	lokerpc.MountHandlers(kitlog.NewNopLogger(), negotiatedMux, newBenchmarkMenuService(typed, lokerpc.ServeCodecs(proto)))
+	lokerpc.MountHandlers(kitlog.NewNopLogger(), negotiatedMux, newBenchmarkMenuService[benchmarkMenu, benchmarkOption](typed, lokerpc.ServeCodecs(proto)))
+	// The fixtures types carry generated protobuf code, so this server and its
+	// client skip reflection when the negotiated schema matches.
+	generatedMenu := fixtures.LargeMenu()
+	generatedMux := http.NewServeMux()
+	lokerpc.MountHandlers(kitlog.NewNopLogger(), generatedMux, newBenchmarkMenuService[fixtures.BenchMenu, fixtures.BenchOption](generatedMenu, lokerpc.ServeCodecs(proto)))
 	legacyServer := httptest.NewServer(benchmarkLegacyGzip(legacyMux))
 	negotiatedServer := httptest.NewServer(benchmarkLegacyGzip(negotiatedMux))
+	generatedServer := httptest.NewServer(benchmarkLegacyGzip(generatedMux))
 	b.Cleanup(legacyServer.Close)
 	b.Cleanup(negotiatedServer.Close)
+	b.Cleanup(generatedServer.Close)
 
 	var httpClients [2]*http.Client
 	for compressed := range 2 {
@@ -130,21 +143,25 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 	}
 
 	// The service schemas come from the same OPTIONS probe a client sends.
-	probe, err := http.NewRequest(http.MethodOptions, negotiatedServer.URL+"/rpc/menu", nil)
-	if err != nil {
-		b.Fatal(err)
+	probe := func(url string) (string, lokerpc.Meta) {
+		request, err := http.NewRequest(http.MethodOptions, url+"/rpc/menu", nil)
+		if err != nil {
+			b.Fatal(err)
+		}
+		response, err := httpClients[0].Do(request)
+		if err != nil {
+			b.Fatal(err)
+		}
+		var meta lokerpc.Meta
+		err = json.NewDecoder(response.Body).Decode(&meta)
+		response.Body.Close()
+		if err != nil || response.StatusCode != http.StatusOK {
+			b.Fatalf("probe: status %d: %v", response.StatusCode, err)
+		}
+		return response.Header.Get("ETag"), meta
 	}
-	probeResponse, err := httpClients[0].Do(probe)
-	if err != nil {
-		b.Fatal(err)
-	}
-	var meta lokerpc.Meta
-	err = json.NewDecoder(probeResponse.Body).Decode(&meta)
-	probeResponse.Body.Close()
-	if err != nil || probeResponse.StatusCode != http.StatusOK {
-		b.Fatalf("probe: status %d: %v", probeResponse.StatusCode, err)
-	}
-	etag := probeResponse.Header.Get("ETag")
+	etag, meta := probe(negotiatedServer.URL)
+	generatedETag, _ := probe(generatedServer.URL)
 	endpoints := map[string]lokerpc.EndpointMeta{}
 	for _, endpoint := range meta.Interfaces {
 		endpoints[endpoint.MethodName] = endpoint
@@ -158,6 +175,13 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 	}
 	emptyProto, bodyProto, smallProto := encodeProto("encode", struct{}{}), encodeProto("decode", typed), encodeProto("small", small)
 
+	var generatedClientMenu menuclient.Menu
+	err = json.Unmarshal(body, &generatedClientMenu)
+	if err != nil {
+		b.Fatal(err)
+	}
+	generatedClientSmall := menuclient.Option{ID: small.ID, Name: small.Name, Price: small.Price}
+
 	paths := []struct {
 		name        string
 		baseURL     string
@@ -165,18 +189,26 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 		accept      string
 		ifMatch     string
 		binary      bool
+		// The Go types the path's client decodes into, and what they must hold.
+		newMenu    func() any
+		newOption  func() any
+		wantMenu   any
+		wantOption any
+		optionArg  any
 	}{
-		{name: "legacy", baseURL: legacyServer.URL, contentType: "application/json"},
-		{name: "negotiated-json", baseURL: negotiatedServer.URL, contentType: "application/json"},
-		{"negotiated-proto", negotiatedServer.URL, proto.ContentType(), proto.ContentType() + ", application/json;q=0.5", etag, true},
+		{"legacy", legacyServer.URL, "application/json", "", "", false, newPointer[benchmarkMenu], newPointer[benchmarkOption], typed, small, small},
+		{"negotiated-json", negotiatedServer.URL, "application/json", "", "", false, newPointer[benchmarkMenu], newPointer[benchmarkOption], typed, small, small},
+		{"negotiated-proto", negotiatedServer.URL, proto.ContentType(), proto.ContentType() + ", application/json;q=0.5", etag, true, newPointer[benchmarkMenu], newPointer[benchmarkOption], typed, small, small},
+		{"generated-proto", generatedServer.URL, proto.ContentType(), proto.ContentType() + ", application/json;q=0.5", generatedETag, true, newPointer[menuclient.Menu], newPointer[menuclient.Option], generatedClientMenu, generatedClientSmall, generatedClientSmall},
 	}
 
-	var clients [2][3]lokerpc.Client
+	var clients [2][4]lokerpc.Client
 	for compressed := range 2 {
 		withHTTP := lokerpc.WithHTTPClient(httpClients[compressed])
 		clients[compressed][0] = lokerpc.NewClient(legacyServer.URL+"/rpc/menu", withHTTP)
 		clients[compressed][1] = lokerpc.NewClient(negotiatedServer.URL+"/rpc/menu", withHTTP)
 		clients[compressed][2] = lokerpc.NewClient(negotiatedServer.URL+"/rpc/menu", withHTTP, lokerpc.ClientCodecs(proto))
+		clients[compressed][3] = lokerpc.NewClient(generatedServer.URL+"/rpc/menu", withHTTP, lokerpc.ClientCodecs(proto))
 	}
 
 	post := func(path int, method string, requestBody []byte) (*http.Response, error) {
@@ -196,7 +228,7 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 	// Count response payload bytes before HTTP's automatic decompression,
 	// excluding HTTP headers and transport framing.
 	for compressed := range 2 {
-		var sizes [3]int
+		var sizes [4]int
 		for index, path := range paths {
 			requestBody := []byte("{}")
 			if path.binary {
@@ -242,31 +274,31 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 					b.Fatalf("gzip %s: read %v, close %v", path.name, err, closeErr)
 				}
 			}
-			var decoded benchmarkMenu
+			decoded := path.newMenu()
 			if path.binary {
-				err = proto.Unmarshal(data, &decoded, endpoints["encode"].ResponseTypeDef, meta.Definitions)
+				err = proto.Unmarshal(data, decoded, endpoints["encode"].ResponseTypeDef, meta.Definitions)
 			} else {
-				err = json.Unmarshal(data, &decoded)
+				err = json.Unmarshal(data, decoded)
 			}
-			if err != nil || !reflect.DeepEqual(typed, decoded) {
+			if err != nil || !reflect.DeepEqual(path.wantMenu, reflect.ValueOf(decoded).Elem().Interface()) {
 				b.Fatalf("wire %s changed menu: %v", path.name, err)
 			}
 		}
-		b.Logf("wire gzip=%t legacy=%d negotiated-json=%d negotiated-proto=%d", compressed == 1, sizes[0], sizes[1], sizes[2])
+		b.Logf("wire gzip=%t legacy=%d negotiated-json=%d negotiated-proto=%d generated-proto=%d", compressed == 1, sizes[0], sizes[1], sizes[2], sizes[3])
 	}
 
 	// Validate each real client outside the measured blocks.
 	for compressed := range 2 {
 		for index, client := range clients[compressed] {
-			var decoded benchmarkMenu
-			err := client.DoRequest(context.Background(), "encode", struct{}{}, &decoded)
-			if err != nil || !reflect.DeepEqual(typed, decoded) {
+			decoded := paths[index].newMenu()
+			err := client.DoRequest(context.Background(), "encode", struct{}{}, decoded)
+			if err != nil || !reflect.DeepEqual(paths[index].wantMenu, reflect.ValueOf(decoded).Elem().Interface()) {
 				b.Fatalf("client %s gzip=%d changed menu: %v", paths[index].name, compressed, err)
 			}
 			if compressed == 0 {
-				var decodedSmall benchmarkOption
-				err := client.DoRequest(context.Background(), "small", small, &decodedSmall)
-				if err != nil || decodedSmall != small {
+				decodedSmall := paths[index].newOption()
+				err := client.DoRequest(context.Background(), "small", paths[index].optionArg, decodedSmall)
+				if err != nil || reflect.ValueOf(decodedSmall).Elem().Interface() != paths[index].wantOption {
 					b.Fatalf("client %s changed small response: %v", paths[index].name, err)
 				}
 			}
@@ -277,7 +309,7 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 
 	cases := []struct {
 		name  string
-		calls [3]func() error
+		calls [4]func() error
 	}{
 		{name: "server-large-response"},
 		{name: "server-large-request"},
@@ -308,14 +340,12 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 		for compressed := range 2 {
 			client := clients[compressed][index]
 			cases[3+compressed].calls[index] = func() error {
-				var response benchmarkMenu
-				return client.DoRequest(context.Background(), "encode", struct{}{}, &response)
+				return client.DoRequest(context.Background(), "encode", struct{}{}, path.newMenu())
 			}
 		}
 		client := clients[0][index]
 		cases[5].calls[index] = func() error {
-			var response benchmarkOption
-			return client.DoRequest(context.Background(), "small", small, &response)
+			return client.DoRequest(context.Background(), "small", path.optionArg, path.newOption())
 		}
 	}
 	for _, test := range cases {
@@ -326,10 +356,10 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 			if b.N == 1 {
 				round++
 			}
-			for offset := range 3 {
+			for offset := range 4 {
 				index := offset
 				if round%2 != 0 {
-					index = 2 - offset
+					index = 3 - offset
 				}
 				start := time.Now()
 				for range b.N {

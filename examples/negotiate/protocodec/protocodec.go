@@ -9,12 +9,12 @@
 package protocodec
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,38 +25,47 @@ import (
 
 const skipField = -1
 
-type kind uint8
+// Kind is the wire shape a Node encodes as.
+type Kind uint8
 
 const (
-	kindBool kind = iota + 1
-	kindInt
-	kindUint
-	kindFloat32
-	kindFloat64
-	kindString
-	kindText
-	kindTimestamp
-	kindStruct
-	kindList
-	kindMap
-	kindJSON
+	KindBool Kind = iota + 1
+	KindInt
+	KindUint
+	KindFloat32
+	KindFloat64
+	KindString
+	KindText
+	KindTimestamp
+	KindStruct
+	KindList
+	KindMap
+	KindJSON
 )
 
-type node struct {
-	kind       kind
-	schemaType jtd.Type
-	fields     []fieldPlan
-	elem       *node
-	key        *node
-	wrapElem   bool
-	packed     bool
+// Node is the compiled plan for one (schema, Go type) pair. The reflection
+// codec executes it and the protogen generator reads it, so both share the
+// same mapping rules.
+type Node struct {
+	Kind       Kind
+	GoType     reflect.Type
+	SchemaType jtd.Type
+	Fields     []FieldPlan
+	Elem       *Node
+	Key        *Node
+	// WrapElem puts each element in a {1: value} message.
+	WrapElem bool
+	// Packed lists write all elements in one length-delimited field.
+	Packed bool
 }
 
-type fieldPlan struct {
-	name  string
-	num   protowire.Number
-	field *codecutil.Field
-	node  *node
+// FieldPlan maps one schema property to a Go field. Field is nil when the Go
+// struct has no field of that name; the property is then skipped.
+type FieldPlan struct {
+	Name  string
+	Num   protowire.Number
+	Field *codecutil.Field
+	Node  *Node
 }
 
 type planKey struct {
@@ -71,7 +80,25 @@ type refKey struct {
 
 // Codec implements lokerpc.Codec for protobuf.
 type Codec struct {
-	plans sync.Map
+	plans        sync.Map
+	fingerprints sync.Map
+}
+
+type fingerprintResult struct {
+	fingerprint string
+	err         error
+}
+
+// generatedMatches reports whether code generated with the given fingerprint
+// encodes this schema. Any doubt falls back to the reflection path.
+func (c *Codec) generatedMatches(generated string, schema *jtd.Schema, defs map[string]jtd.Schema) bool {
+	cached, ok := c.fingerprints.Load(schema)
+	if !ok {
+		fingerprint, err := Fingerprint(schema, defs)
+		cached, _ = c.fingerprints.LoadOrStore(schema, fingerprintResult{fingerprint, err})
+	}
+	result := cached.(fingerprintResult)
+	return result.err == nil && result.fingerprint == generated
 }
 
 func New() *Codec {
@@ -82,20 +109,20 @@ func (*Codec) ContentType() string {
 	return "application/x-protobuf"
 }
 
-func (c *Codec) plan(schema *jtd.Schema, typ reflect.Type, defs map[string]jtd.Schema) (*node, error) {
+func (c *Codec) plan(schema *jtd.Schema, typ reflect.Type, defs map[string]jtd.Schema) (*Node, error) {
 	key := planKey{schema, typ}
 	if cached, ok := c.plans.Load(key); ok {
-		return cached.(*node), nil
+		return cached.(*Node), nil
 	}
 
-	compiler := compiler{defs: defs, refs: map[refKey]*node{}}
+	compiler := compiler{defs: defs, refs: map[refKey]*Node{}}
 	plan, err := compiler.compile(schema, typ)
 	if err != nil {
 		return nil, err
 	}
 
 	cached, _ := c.plans.LoadOrStore(key, plan)
-	return cached.(*node), nil
+	return cached.(*Node), nil
 }
 
 func (c *Codec) Marshal(v any, schema *jtd.Schema, defs map[string]jtd.Schema) ([]byte, error) {
@@ -104,6 +131,12 @@ func (c *Codec) Marshal(v any, schema *jtd.Schema, defs map[string]jtd.Schema) (
 	}
 
 	value := reflect.ValueOf(v)
+	generated, ok := v.(Marshaler)
+	nilPointer := value.Kind() == reflect.Pointer && value.IsNil()
+	if ok && !nilPointer && c.generatedMatches(generated.ProtoFingerprint(), schema, defs) {
+		return generated.MarshalProto()
+	}
+
 	plan, err := c.plan(schema, value.Type(), defs)
 	if err != nil {
 		return nil, err
@@ -115,6 +148,11 @@ func (c *Codec) Unmarshal(data []byte, v any, schema *jtd.Schema, defs map[strin
 	target := reflect.ValueOf(v)
 	if target.Kind() != reflect.Pointer || target.IsNil() {
 		return fmt.Errorf("protocodec: unmarshal target must be a non-nil pointer, got %T", v)
+	}
+
+	generated, ok := v.(Unmarshaler)
+	if ok && c.generatedMatches(generated.ProtoFingerprint(), schema, defs) {
+		return generated.UnmarshalProto(data)
 	}
 
 	plan, err := c.plan(schema, target.Type().Elem(), defs)
@@ -130,19 +168,25 @@ func (c *Codec) Unmarshal(data []byte, v any, schema *jtd.Schema, defs map[strin
 	})
 }
 
-type compiler struct {
-	defs map[string]jtd.Schema
-	refs map[refKey]*node
+// Compile builds the plan for schema mapped onto goType.
+func Compile(schema *jtd.Schema, goType reflect.Type, defs map[string]jtd.Schema) (*Node, error) {
+	c := compiler{defs: defs, refs: map[refKey]*Node{}}
+	return c.compile(schema, goType)
 }
 
-func (c *compiler) compile(schema *jtd.Schema, goType reflect.Type) (*node, error) {
+type compiler struct {
+	defs map[string]jtd.Schema
+	refs map[refKey]*Node
+}
+
+func (c *compiler) compile(schema *jtd.Schema, goType reflect.Type) (*Node, error) {
 	resolved, _, err := codecutil.Resolve(schema, c.defs)
 	if err != nil {
 		return nil, err
 	}
 
 	if schema.Ref == nil {
-		n := &node{}
+		n := &Node{}
 		return n, c.build(n, resolved, goType)
 	}
 
@@ -150,12 +194,13 @@ func (c *compiler) compile(schema *jtd.Schema, goType reflect.Type) (*node, erro
 	if n, ok := c.refs[key]; ok {
 		return n, nil
 	}
-	n := &node{}
+	n := &Node{}
 	c.refs[key] = n
 	return n, c.build(n, resolved, goType)
 }
 
-func (c *compiler) build(n *node, schema *jtd.Schema, goType reflect.Type) error {
+func (c *compiler) build(n *Node, schema *jtd.Schema, goType reflect.Type) error {
+	n.GoType = goType
 	base := goType
 	for base.Kind() == reflect.Pointer {
 		base = base.Elem()
@@ -163,7 +208,7 @@ func (c *compiler) build(n *node, schema *jtd.Schema, goType reflect.Type) error
 
 	switch schema.Form() {
 	case jtd.FormEmpty, jtd.FormDiscriminator:
-		n.kind = kindJSON
+		n.Kind = KindJSON
 	case jtd.FormEnum:
 		return n.buildString(base)
 	case jtd.FormType:
@@ -180,52 +225,52 @@ func (c *compiler) build(n *node, schema *jtd.Schema, goType reflect.Type) error
 	return nil
 }
 
-func (n *node) buildString(base reflect.Type) error {
-	n.kind = kindString
+func (n *Node) buildString(base reflect.Type) error {
+	n.Kind = KindString
 	if base.Kind() == reflect.String {
 		return nil
 	}
 	if !codecutil.IsTextType(base) {
 		return fmt.Errorf("cannot map string schema to %s", base)
 	}
-	n.kind = kindText
+	n.Kind = KindText
 	return nil
 }
 
-func (n *node) buildType(schemaType jtd.Type, base reflect.Type) error {
-	n.schemaType = schemaType
+func (n *Node) buildType(schemaType jtd.Type, base reflect.Type) error {
+	n.SchemaType = schemaType
 
 	var want string
 	switch schemaType {
 	case jtd.TypeBoolean:
-		n.kind, want = kindBool, "bool"
+		n.Kind, want = KindBool, "bool"
 		if base.Kind() == reflect.Bool {
 			return nil
 		}
 	case jtd.TypeString:
 		return n.buildString(base)
 	case jtd.TypeTimestamp:
-		n.kind, want = kindTimestamp, "time.Time"
+		n.Kind, want = KindTimestamp, "time.Time"
 		if base == reflect.TypeFor[time.Time]() {
 			return nil
 		}
 	case jtd.TypeInt8, jtd.TypeInt16, jtd.TypeInt32:
-		n.kind, want = kindInt, "integer"
+		n.Kind, want = KindInt, "integer"
 		if isInteger(base) {
 			return nil
 		}
 	case jtd.TypeUint8, jtd.TypeUint16, jtd.TypeUint32:
-		n.kind, want = kindUint, "integer"
+		n.Kind, want = KindUint, "integer"
 		if isInteger(base) {
 			return nil
 		}
 	case jtd.TypeFloat32:
-		n.kind, want = kindFloat32, "float"
+		n.Kind, want = KindFloat32, "float"
 		if base.Kind() == reflect.Float32 || base.Kind() == reflect.Float64 {
 			return nil
 		}
 	case jtd.TypeFloat64:
-		n.kind, want = kindFloat64, "float"
+		n.Kind, want = KindFloat64, "float"
 		if base.Kind() == reflect.Float32 || base.Kind() == reflect.Float64 {
 			return nil
 		}
@@ -259,19 +304,19 @@ func (c *compiler) needsWrap(schema *jtd.Schema) (bool, error) {
 	return nullable, nil
 }
 
-func (c *compiler) buildList(n *node, schema *jtd.Schema, base reflect.Type) error {
+func (c *compiler) buildList(n *Node, schema *jtd.Schema, base reflect.Type) error {
 	if base.Kind() != reflect.Slice {
 		return fmt.Errorf("cannot map elements schema to %s", base)
 	}
 
-	n.kind = kindList
+	n.Kind = KindList
 
 	var err error
-	n.wrapElem, err = c.needsWrap(schema.Elements)
+	n.WrapElem, err = c.needsWrap(schema.Elements)
 	if err != nil {
 		return err
 	}
-	n.elem, err = c.compile(schema.Elements, base.Elem())
+	n.Elem, err = c.compile(schema.Elements, base.Elem())
 	if err != nil {
 		return err
 	}
@@ -280,62 +325,62 @@ func (c *compiler) buildList(n *node, schema *jtd.Schema, base reflect.Type) err
 	if err != nil {
 		return err
 	}
-	n.packed = !n.wrapElem && resolved.Form() == jtd.FormType && resolved.Type != jtd.TypeString && resolved.Type != jtd.TypeTimestamp
+	n.Packed = !n.WrapElem && resolved.Form() == jtd.FormType && resolved.Type != jtd.TypeString && resolved.Type != jtd.TypeTimestamp
 	return nil
 }
 
-func (c *compiler) buildMap(n *node, schema *jtd.Schema, base reflect.Type) error {
+func (c *compiler) buildMap(n *Node, schema *jtd.Schema, base reflect.Type) error {
 	if base.Kind() != reflect.Map {
 		return fmt.Errorf("cannot map values schema to %s", base)
 	}
 
-	n.kind = kindMap
+	n.Kind = KindMap
 
 	var err error
-	n.key, err = c.compile(&jtd.Schema{Type: jtd.TypeString}, base.Key())
+	n.Key, err = c.compile(&jtd.Schema{Type: jtd.TypeString}, base.Key())
 	if err != nil {
 		return err
 	}
-	n.wrapElem, err = c.needsWrap(schema.Values)
+	n.WrapElem, err = c.needsWrap(schema.Values)
 	if err != nil {
 		return err
 	}
-	n.elem, err = c.compile(schema.Values, base.Elem())
+	n.Elem, err = c.compile(schema.Values, base.Elem())
 	return err
 }
 
-func (c *compiler) buildStruct(n *node, schema *jtd.Schema, base reflect.Type) error {
+func (c *compiler) buildStruct(n *Node, schema *jtd.Schema, base reflect.Type) error {
 	if base.Kind() != reflect.Struct {
 		return fmt.Errorf("cannot map properties schema to %s", base)
 	}
 
-	n.kind = kindStruct
+	n.Kind = KindStruct
 	goFields := codecutil.StructFields(base)
 
 	for i, prop := range codecutil.Properties(schema) {
-		plan := fieldPlan{name: prop.Name, num: protowire.Number(i + 1)}
+		plan := FieldPlan{Name: prop.Name, Num: protowire.Number(i + 1)}
 
 		goField, ok := goFields[prop.Name]
 		if ok {
 			var err error
-			plan.field = &goField
-			plan.node, err = c.compile(&prop.Schema, goField.Type)
+			plan.Field = &goField
+			plan.Node, err = c.compile(&prop.Schema, goField.Type)
 			if err != nil {
 				return fmt.Errorf("%s: %w", prop.Name, err)
 			}
 		}
-		n.fields = append(n.fields, plan)
+		n.Fields = append(n.Fields, plan)
 	}
 	return nil
 }
 
-func (n *node) wireType() protowire.Type {
-	switch n.kind {
-	case kindBool, kindInt, kindUint:
+func (n *Node) wireType() protowire.Type {
+	switch n.Kind {
+	case KindBool, KindInt, KindUint:
 		return protowire.VarintType
-	case kindFloat32:
+	case KindFloat32:
 		return protowire.Fixed32Type
-	case kindFloat64:
+	case KindFloat64:
 		return protowire.Fixed64Type
 	}
 	return protowire.BytesType
@@ -343,9 +388,9 @@ func (n *node) wireType() protowire.Type {
 
 // appendField encodes a field with proto3 presence: nil pointers and
 // zero non-pointer scalars are omitted, a non-nil pointer is always written.
-func (n *node) appendField(b []byte, num protowire.Number, v reflect.Value) ([]byte, error) {
+func (n *Node) appendField(b []byte, num protowire.Number, v reflect.Value) ([]byte, error) {
 	explicit := false
-	if n.kind != kindJSON {
+	if n.Kind != KindJSON {
 		for v.Kind() == reflect.Pointer {
 			if v.IsNil() {
 				return b, nil
@@ -355,19 +400,19 @@ func (n *node) appendField(b []byte, num protowire.Number, v reflect.Value) ([]b
 		}
 	}
 
-	switch n.kind {
-	case kindList:
+	switch n.Kind {
+	case KindList:
 		return n.appendList(b, num, v)
-	case kindMap:
+	case KindMap:
 		return n.appendMap(b, num, v)
-	case kindJSON:
+	case KindJSON:
 		switch v.Kind() {
 		case reflect.Interface, reflect.Pointer, reflect.Map, reflect.Slice:
 			if v.IsNil() {
 				return b, nil
 			}
 		}
-	case kindBool, kindInt, kindUint, kindFloat32, kindFloat64, kindString, kindTimestamp:
+	case KindBool, KindInt, KindUint, KindFloat32, KindFloat64, KindString, KindTimestamp:
 		if !explicit && v.IsZero() {
 			return b, nil
 		}
@@ -377,35 +422,35 @@ func (n *node) appendField(b []byte, num protowire.Number, v reflect.Value) ([]b
 	return n.appendPayload(b, v)
 }
 
-func (n *node) appendPayload(b []byte, v reflect.Value) ([]byte, error) {
-	switch n.kind {
-	case kindBool:
+func (n *Node) appendPayload(b []byte, v reflect.Value) ([]byte, error) {
+	switch n.Kind {
+	case KindBool:
 		return protowire.AppendVarint(b, protowire.EncodeBool(v.Bool())), nil
-	case kindInt:
-		num, err := codecutil.IntForSchema(v, n.schemaType)
+	case KindInt:
+		num, err := codecutil.IntForSchema(v, n.SchemaType)
 		if err != nil {
 			return nil, err
 		}
 		return protowire.AppendVarint(b, protowire.EncodeZigZag(num)), nil
-	case kindUint:
-		num, err := codecutil.IntForSchema(v, n.schemaType)
+	case KindUint:
+		num, err := codecutil.IntForSchema(v, n.SchemaType)
 		if err != nil {
 			return nil, err
 		}
 		return protowire.AppendVarint(b, uint64(num)), nil
-	case kindFloat32:
+	case KindFloat32:
 		return protowire.AppendFixed32(b, math.Float32bits(float32(v.Float()))), nil
-	case kindFloat64:
+	case KindFloat64:
 		return protowire.AppendFixed64(b, math.Float64bits(v.Float())), nil
-	case kindString:
+	case KindString:
 		return protowire.AppendString(b, v.String()), nil
-	case kindText:
+	case KindText:
 		text, err := codecutil.MarshalText(v)
 		if err != nil {
 			return nil, err
 		}
 		return protowire.AppendBytes(b, text), nil
-	case kindTimestamp:
+	case KindTimestamp:
 		t := v.Interface().(time.Time).UTC()
 		var msg []byte
 		if seconds := t.Unix(); seconds != 0 {
@@ -417,23 +462,23 @@ func (n *node) appendPayload(b []byte, v reflect.Value) ([]byte, error) {
 			msg = protowire.AppendVarint(msg, uint64(nanos))
 		}
 		return protowire.AppendBytes(b, msg), nil
-	case kindStruct:
+	case KindStruct:
 		// Reserve a one byte length prefix, widening it afterwards if the body is longer.
 		prefixAt := len(b)
 		b = append(b, 0)
 		bodyAt := len(b)
-		for _, plan := range n.fields {
-			if plan.field == nil {
+		for _, plan := range n.Fields {
+			if plan.Field == nil {
 				continue
 			}
-			fieldValue, ok := plan.field.Get(v)
+			fieldValue, ok := plan.Field.Get(v)
 			if !ok {
 				continue
 			}
 			var err error
-			b, err = plan.node.appendField(b, plan.num, fieldValue)
+			b, err = plan.Node.appendField(b, plan.Num, fieldValue)
 			if err != nil {
-				return nil, fmt.Errorf("%s: %w", plan.name, err)
+				return nil, fmt.Errorf("%s: %w", plan.Name, err)
 			}
 		}
 		bodyLen := uint64(len(b) - bodyAt)
@@ -442,14 +487,14 @@ func (n *node) appendPayload(b []byte, v reflect.Value) ([]byte, error) {
 		}
 		protowire.AppendVarint(b[:prefixAt], bodyLen)
 		return b, nil
-	case kindJSON:
+	case KindJSON:
 		encoded, err := json.Marshal(v.Interface())
 		if err != nil {
 			return nil, err
 		}
 		return protowire.AppendBytes(b, encoded), nil
 	}
-	return nil, fmt.Errorf("kind %d has no scalar payload", n.kind)
+	return nil, fmt.Errorf("kind %d has no scalar payload", n.Kind)
 }
 
 func derefElement(v reflect.Value) (reflect.Value, error) {
@@ -462,19 +507,19 @@ func derefElement(v reflect.Value) (reflect.Value, error) {
 	return v, nil
 }
 
-func (n *node) appendList(b []byte, num protowire.Number, v reflect.Value) ([]byte, error) {
+func (n *Node) appendList(b []byte, num protowire.Number, v reflect.Value) ([]byte, error) {
 	if v.Len() == 0 {
 		return b, nil
 	}
 
-	if n.packed {
+	if n.Packed {
 		var packed []byte
 		for i := range v.Len() {
 			element, err := derefElement(v.Index(i))
 			if err != nil {
 				return nil, err
 			}
-			packed, err = n.elem.appendPayload(packed, element)
+			packed, err = n.Elem.appendPayload(packed, element)
 			if err != nil {
 				return nil, fmt.Errorf("[%d]: %w", i, err)
 			}
@@ -485,9 +530,9 @@ func (n *node) appendList(b []byte, num protowire.Number, v reflect.Value) ([]by
 
 	for i := range v.Len() {
 		var err error
-		if n.wrapElem {
+		if n.WrapElem {
 			var wrapper []byte
-			wrapper, err = n.elem.appendField(nil, 1, v.Index(i))
+			wrapper, err = n.Elem.appendField(nil, 1, v.Index(i))
 			b = protowire.AppendTag(b, num, protowire.BytesType)
 			b = protowire.AppendBytes(b, wrapper)
 		} else {
@@ -496,8 +541,8 @@ func (n *node) appendList(b []byte, num protowire.Number, v reflect.Value) ([]by
 			if err != nil {
 				return nil, err
 			}
-			b = protowire.AppendTag(b, num, n.elem.wireType())
-			b, err = n.elem.appendPayload(b, element)
+			b = protowire.AppendTag(b, num, n.Elem.wireType())
+			b, err = n.Elem.appendPayload(b, element)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("[%d]: %w", i, err)
@@ -506,35 +551,47 @@ func (n *node) appendList(b []byte, num protowire.Number, v reflect.Value) ([]by
 	return b, nil
 }
 
-func (n *node) appendMap(b []byte, num protowire.Number, v reflect.Value) ([]byte, error) {
-	entries := make([][]byte, 0, v.Len())
+func (n *Node) appendMap(b []byte, num protowire.Number, v reflect.Value) ([]byte, error) {
+	type entryBytes struct {
+		key   string
+		bytes []byte
+	}
+	entries := make([]entryBytes, 0, v.Len())
 
 	for iter := v.MapRange(); iter.Next(); {
-		entry, err := n.key.appendField(nil, 1, iter.Key())
+		entry, err := n.Key.appendField(nil, 1, iter.Key())
 		if err != nil {
 			return nil, err
 		}
+		sortKey := iter.Key().String()
+		if n.Key.Kind == KindText {
+			text, err := codecutil.MarshalText(iter.Key())
+			if err != nil {
+				return nil, err
+			}
+			sortKey = string(text)
+		}
 
-		if n.wrapElem {
-			wrapper, err := n.elem.appendField(nil, 1, iter.Value())
+		if n.WrapElem {
+			wrapper, err := n.Elem.appendField(nil, 1, iter.Value())
 			if err != nil {
 				return nil, fmt.Errorf("[%v]: %w", iter.Key(), err)
 			}
 			entry = protowire.AppendTag(entry, 2, protowire.BytesType)
 			entry = protowire.AppendBytes(entry, wrapper)
 		} else {
-			entry, err = n.elem.appendField(entry, 2, iter.Value())
+			entry, err = n.Elem.appendField(entry, 2, iter.Value())
 			if err != nil {
 				return nil, fmt.Errorf("[%v]: %w", iter.Key(), err)
 			}
 		}
-		entries = append(entries, entry)
+		entries = append(entries, entryBytes{sortKey, entry})
 	}
 
-	slices.SortFunc(entries, bytes.Compare)
+	slices.SortFunc(entries, func(a, b entryBytes) int { return strings.Compare(a.key, b.key) })
 	for _, entry := range entries {
 		b = protowire.AppendTag(b, num, protowire.BytesType)
-		b = protowire.AppendBytes(b, entry)
+		b = protowire.AppendBytes(b, entry.bytes)
 	}
 	return b, nil
 }
@@ -575,19 +632,19 @@ func allocate(v reflect.Value) reflect.Value {
 
 // readField decodes one occurrence of the field whose value starts at b into
 // dst and returns the bytes consumed. Lists and maps accumulate over repeats.
-func (n *node) readField(b []byte, wireType protowire.Type, dst reflect.Value) (int, error) {
-	switch n.kind {
-	case kindList:
+func (n *Node) readField(b []byte, wireType protowire.Type, dst reflect.Value) (int, error) {
+	switch n.Kind {
+	case KindList:
 		return n.readListItem(b, wireType, allocate(dst))
-	case kindMap:
+	case KindMap:
 		return n.readMapEntry(b, wireType, allocate(dst))
-	case kindJSON:
+	case KindJSON:
 		return n.readPayload(b, wireType, dst)
 	}
 	return n.readPayload(b, wireType, allocate(dst))
 }
 
-func (n *node) readPayload(b []byte, wireType protowire.Type, dst reflect.Value) (int, error) {
+func (n *Node) readPayload(b []byte, wireType protowire.Type, dst reflect.Value) (int, error) {
 	if wireType != n.wireType() {
 		return 0, fmt.Errorf("wire type %d, want %d", wireType, n.wireType())
 	}
@@ -620,12 +677,12 @@ func (n *node) readPayload(b []byte, wireType protowire.Type, dst reflect.Value)
 	return consumed, n.setBytes(dst, body)
 }
 
-func (n *node) setVarint(dst reflect.Value, raw uint64) error {
-	switch n.kind {
-	case kindBool:
+func (n *Node) setVarint(dst reflect.Value, raw uint64) error {
+	switch n.Kind {
+	case KindBool:
 		dst.SetBool(protowire.DecodeBool(raw))
 		return nil
-	case kindInt:
+	case KindInt:
 		return codecutil.SetInt(dst, protowire.DecodeZigZag(raw))
 	}
 	if raw > math.MaxInt64 {
@@ -634,65 +691,47 @@ func (n *node) setVarint(dst reflect.Value, raw uint64) error {
 	return codecutil.SetInt(dst, int64(raw))
 }
 
-func (n *node) setBytes(dst reflect.Value, body []byte) error {
-	switch n.kind {
-	case kindString:
+func (n *Node) setBytes(dst reflect.Value, body []byte) error {
+	switch n.Kind {
+	case KindString:
 		dst.SetString(string(body))
 		return nil
-	case kindText:
+	case KindText:
 		return codecutil.UnmarshalText(dst, body)
-	case kindJSON:
+	case KindJSON:
 		return json.Unmarshal(body, dst.Addr().Interface())
-	case kindTimestamp:
-		var seconds, nanos int64
-		err := eachField(body, func(num protowire.Number, wireType protowire.Type, value []byte) (int, error) {
-			if num != 1 && num != 2 {
-				return skipField, nil
-			}
-			if wireType != protowire.VarintType {
-				return 0, fmt.Errorf("timestamp wire type %d, want varint", wireType)
-			}
-			raw, consumed := protowire.ConsumeVarint(value)
-			if consumed < 0 {
-				return 0, protowire.ParseError(consumed)
-			}
-			if num == 1 {
-				seconds = int64(raw)
-				return consumed, nil
-			}
-			nanos = int64(raw)
-			return consumed, nil
-		})
+	case KindTimestamp:
+		t, err := ConsumeTimestamp(body)
 		if err != nil {
 			return err
 		}
-		dst.Set(reflect.ValueOf(time.Unix(seconds, nanos).UTC()))
+		dst.Set(reflect.ValueOf(t))
 		return nil
 	}
 
 	return eachField(body, func(num protowire.Number, wireType protowire.Type, value []byte) (int, error) {
 		index := int(num) - 1
-		if index < 0 || index >= len(n.fields) || n.fields[index].field == nil {
+		if index < 0 || index >= len(n.Fields) || n.Fields[index].Field == nil {
 			return skipField, nil
 		}
-		plan := n.fields[index]
-		consumed, err := plan.node.readField(value, wireType, plan.field.Ensure(dst))
+		plan := n.Fields[index]
+		consumed, err := plan.Node.readField(value, wireType, plan.Field.Ensure(dst))
 		if err != nil {
-			return 0, fmt.Errorf("%s: %w", plan.name, err)
+			return 0, fmt.Errorf("%s: %w", plan.Name, err)
 		}
 		return consumed, nil
 	})
 }
 
-func (n *node) readListItem(b []byte, wireType protowire.Type, dst reflect.Value) (int, error) {
-	if n.packed && wireType == protowire.BytesType {
+func (n *Node) readListItem(b []byte, wireType protowire.Type, dst reflect.Value) (int, error) {
+	if n.Packed && wireType == protowire.BytesType {
 		packed, consumed := protowire.ConsumeBytes(b)
 		if consumed < 0 {
 			return 0, protowire.ParseError(consumed)
 		}
 		for len(packed) > 0 {
 			element := appendSlot(dst)
-			read, err := n.elem.readPayload(packed, n.elem.wireType(), element)
+			read, err := n.Elem.readPayload(packed, n.Elem.wireType(), element)
 			if err != nil {
 				return 0, err
 			}
@@ -703,8 +742,8 @@ func (n *node) readListItem(b []byte, wireType protowire.Type, dst reflect.Value
 
 	element := appendSlot(dst)
 
-	if !n.wrapElem {
-		return n.elem.readPayload(b, wireType, allocate(element))
+	if !n.WrapElem {
+		return n.Elem.readPayload(b, wireType, allocate(element))
 	}
 
 	if wireType != protowire.BytesType {
@@ -724,16 +763,16 @@ func appendSlot(slice reflect.Value) reflect.Value {
 	return slice.Index(length)
 }
 
-func (n *node) readWrapper(wrapper []byte, dst reflect.Value) error {
+func (n *Node) readWrapper(wrapper []byte, dst reflect.Value) error {
 	return eachField(wrapper, func(num protowire.Number, wireType protowire.Type, value []byte) (int, error) {
 		if num != 1 {
 			return skipField, nil
 		}
-		return n.elem.readField(value, wireType, dst)
+		return n.Elem.readField(value, wireType, dst)
 	})
 }
 
-func (n *node) readMapEntry(b []byte, wireType protowire.Type, dst reflect.Value) (int, error) {
+func (n *Node) readMapEntry(b []byte, wireType protowire.Type, dst reflect.Value) (int, error) {
 	if wireType != protowire.BytesType {
 		return 0, fmt.Errorf("wire type %d, want bytes", wireType)
 	}
@@ -751,8 +790,8 @@ func (n *node) readMapEntry(b []byte, wireType protowire.Type, dst reflect.Value
 	err := eachField(entry, func(num protowire.Number, wireType protowire.Type, rest []byte) (int, error) {
 		switch {
 		case num == 1:
-			return n.key.readField(rest, wireType, key)
-		case num == 2 && n.wrapElem:
+			return n.Key.readField(rest, wireType, key)
+		case num == 2 && n.WrapElem:
 			if wireType != protowire.BytesType {
 				return 0, fmt.Errorf("wire type %d, want bytes", wireType)
 			}
@@ -762,7 +801,7 @@ func (n *node) readMapEntry(b []byte, wireType protowire.Type, dst reflect.Value
 			}
 			return read, n.readWrapper(wrapper, value)
 		case num == 2:
-			return n.elem.readField(rest, wireType, value)
+			return n.Elem.readField(rest, wireType, value)
 		}
 		return skipField, nil
 	})
