@@ -17,6 +17,8 @@ import (
 
 	"github.com/LOKE/pkg/examples/negotiate/fixtures"
 	"github.com/LOKE/pkg/examples/negotiate/fixtures/menuclient"
+	"github.com/LOKE/pkg/examples/negotiate/jsonengines"
+	"github.com/LOKE/pkg/examples/negotiate/msgpackcodec"
 	"github.com/LOKE/pkg/examples/negotiate/protocodec"
 	"github.com/LOKE/pkg/lokerpc"
 	kitlog "github.com/go-kit/log"
@@ -107,6 +109,7 @@ func newBenchmarkMenuService[Menu, Option any](menu Menu, opts ...lokerpc.Servic
 // without parsing; round trips use the real clients.
 func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 	proto := protocodec.New()
+	msgpackCodec := msgpackcodec.New()
 	typed := largeBenchmarkMenu()
 	body, err := json.Marshal(typed)
 	if err != nil {
@@ -127,12 +130,22 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 	generatedMenu := fixtures.LargeMenu()
 	generatedMux := http.NewServeMux()
 	lokerpc.MountHandlers(kitlog.NewNopLogger(), generatedMux, newBenchmarkMenuService[fixtures.BenchMenu, fixtures.BenchOption](generatedMenu, lokerpc.ServeCodecs(proto)))
-	legacyServer := httptest.NewServer(benchmarkLegacyGzip(legacyMux))
-	negotiatedServer := httptest.NewServer(benchmarkLegacyGzip(negotiatedMux))
-	generatedServer := httptest.NewServer(benchmarkLegacyGzip(generatedMux))
-	b.Cleanup(legacyServer.Close)
-	b.Cleanup(negotiatedServer.Close)
-	b.Cleanup(generatedServer.Close)
+	// The JSON engines keep the wire format; only the library behind it changes.
+	jsonV2Mux := http.NewServeMux()
+	lokerpc.MountHandlers(kitlog.NewNopLogger(), jsonV2Mux, newBenchmarkMenuService[benchmarkMenu, benchmarkOption](typed, lokerpc.ServeJSON(jsonengines.V2{})))
+	goJSONMux := http.NewServeMux()
+	lokerpc.MountHandlers(kitlog.NewNopLogger(), goJSONMux, newBenchmarkMenuService[benchmarkMenu, benchmarkOption](typed, lokerpc.ServeJSON(jsonengines.GoJSON{})))
+	// The fixtures types also carry tinylib/msgp generated methods.
+	msgpackMux := http.NewServeMux()
+	lokerpc.MountHandlers(kitlog.NewNopLogger(), msgpackMux, newBenchmarkMenuService[fixtures.BenchMenu, fixtures.BenchOption](generatedMenu, lokerpc.ServeCodecs(msgpackCodec)))
+
+	newServer := func(mux http.Handler) *httptest.Server {
+		server := httptest.NewServer(benchmarkLegacyGzip(mux))
+		b.Cleanup(server.Close)
+		return server
+	}
+	legacyServer, negotiatedServer, generatedServer := newServer(legacyMux), newServer(negotiatedMux), newServer(generatedMux)
+	jsonV2Server, goJSONServer, msgpackServer := newServer(jsonV2Mux), newServer(goJSONMux), newServer(msgpackMux)
 
 	var httpClients [2]*http.Client
 	for compressed := range 2 {
@@ -175,6 +188,15 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 	}
 	emptyProto, bodyProto, smallProto := encodeProto("encode", struct{}{}), encodeProto("decode", typed), encodeProto("small", small)
 
+	msgpackBody := func(value any) []byte {
+		data, err := msgpackCodec.Marshal(value, nil, nil)
+		if err != nil {
+			b.Fatal(err)
+		}
+		return data
+	}
+	emptyMsgpack, bodyMsgpack, smallMsgpack := msgpackBody(struct{}{}), msgpackBody(generatedMenu), msgpackBody(fixtures.BenchOption{ID: small.ID, Name: small.Name, Price: small.Price})
+
 	var generatedClientMenu menuclient.Menu
 	err = json.Unmarshal(body, &generatedClientMenu)
 	if err != nil {
@@ -182,13 +204,17 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 	}
 	generatedClientSmall := menuclient.Option{ID: small.ID, Name: small.Name, Price: small.Price}
 
+	jsonBodies := [3][]byte{[]byte("{}"), body, smallJSON}
+	protoBodies := [3][]byte{emptyProto, bodyProto, smallProto}
 	paths := []struct {
 		name        string
 		baseURL     string
 		contentType string
 		accept      string
 		ifMatch     string
-		binary      bool
+		// codec is nil for JSON paths.
+		codec         lokerpc.Codec
+		requestBodies [3][]byte
 		// The Go types the path's client decodes into, and what they must hold.
 		newMenu    func() any
 		newOption  func() any
@@ -196,19 +222,26 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 		wantOption any
 		optionArg  any
 	}{
-		{"legacy", legacyServer.URL, "application/json", "", "", false, newPointer[benchmarkMenu], newPointer[benchmarkOption], typed, small, small},
-		{"negotiated-json", negotiatedServer.URL, "application/json", "", "", false, newPointer[benchmarkMenu], newPointer[benchmarkOption], typed, small, small},
-		{"negotiated-proto", negotiatedServer.URL, proto.ContentType(), proto.ContentType() + ", application/json;q=0.5", etag, true, newPointer[benchmarkMenu], newPointer[benchmarkOption], typed, small, small},
-		{"generated-proto", generatedServer.URL, proto.ContentType(), proto.ContentType() + ", application/json;q=0.5", generatedETag, true, newPointer[menuclient.Menu], newPointer[menuclient.Option], generatedClientMenu, generatedClientSmall, generatedClientSmall},
+		{"legacy", legacyServer.URL, "application/json", "", "", nil, jsonBodies, newPointer[benchmarkMenu], newPointer[benchmarkOption], typed, small, small},
+		{"negotiated-json", negotiatedServer.URL, "application/json", "", "", nil, jsonBodies, newPointer[benchmarkMenu], newPointer[benchmarkOption], typed, small, small},
+		{"negotiated-proto", negotiatedServer.URL, proto.ContentType(), proto.ContentType() + ", application/json;q=0.5", etag, proto, protoBodies, newPointer[benchmarkMenu], newPointer[benchmarkOption], typed, small, small},
+		{"generated-proto", generatedServer.URL, proto.ContentType(), proto.ContentType() + ", application/json;q=0.5", generatedETag, proto, protoBodies, newPointer[menuclient.Menu], newPointer[menuclient.Option], generatedClientMenu, generatedClientSmall, generatedClientSmall},
+		{"jsonv2", jsonV2Server.URL, "application/json", "", "", nil, jsonBodies, newPointer[benchmarkMenu], newPointer[benchmarkOption], typed, small, small},
+		{"gojson", goJSONServer.URL, "application/json", "", "", nil, jsonBodies, newPointer[benchmarkMenu], newPointer[benchmarkOption], typed, small, small},
+		{"msgpack", msgpackServer.URL, msgpackCodec.ContentType(), msgpackCodec.ContentType() + ", application/json;q=0.5", "", msgpackCodec, [3][]byte{emptyMsgpack, bodyMsgpack, smallMsgpack}, newPointer[menuclient.Menu], newPointer[menuclient.Option], generatedClientMenu, generatedClientSmall, generatedClientSmall},
 	}
 
-	var clients [2][4]lokerpc.Client
+	const pathCount = 7
+	var clients [2][pathCount]lokerpc.Client
 	for compressed := range 2 {
 		withHTTP := lokerpc.WithHTTPClient(httpClients[compressed])
 		clients[compressed][0] = lokerpc.NewClient(legacyServer.URL+"/rpc/menu", withHTTP)
 		clients[compressed][1] = lokerpc.NewClient(negotiatedServer.URL+"/rpc/menu", withHTTP)
 		clients[compressed][2] = lokerpc.NewClient(negotiatedServer.URL+"/rpc/menu", withHTTP, lokerpc.ClientCodecs(proto))
 		clients[compressed][3] = lokerpc.NewClient(generatedServer.URL+"/rpc/menu", withHTTP, lokerpc.ClientCodecs(proto))
+		clients[compressed][4] = lokerpc.NewClient(jsonV2Server.URL+"/rpc/menu", withHTTP, lokerpc.ClientJSON(jsonengines.V2{}))
+		clients[compressed][5] = lokerpc.NewClient(goJSONServer.URL+"/rpc/menu", withHTTP, lokerpc.ClientJSON(jsonengines.GoJSON{}))
+		clients[compressed][6] = lokerpc.NewClient(msgpackServer.URL+"/rpc/menu", withHTTP, lokerpc.ClientCodecs(msgpackCodec))
 	}
 
 	post := func(path int, method string, requestBody []byte) (*http.Response, error) {
@@ -218,8 +251,10 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 			return nil, err
 		}
 		request.Header.Set("Content-Type", p.contentType)
-		if p.binary {
+		if p.codec != nil {
 			request.Header.Set("Accept", p.accept)
+		}
+		if p.ifMatch != "" {
 			request.Header.Set("If-Match", p.ifMatch)
 		}
 		return httpClients[0].Do(request)
@@ -228,19 +263,17 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 	// Count response payload bytes before HTTP's automatic decompression,
 	// excluding HTTP headers and transport framing.
 	for compressed := range 2 {
-		var sizes [4]int
+		var sizes [pathCount]int
 		for index, path := range paths {
-			requestBody := []byte("{}")
-			if path.binary {
-				requestBody = emptyProto
-			}
-			request, err := http.NewRequest(http.MethodPost, path.baseURL+"/rpc/menu/encode", bytes.NewReader(requestBody))
+			request, err := http.NewRequest(http.MethodPost, path.baseURL+"/rpc/menu/encode", bytes.NewReader(path.requestBodies[0]))
 			if err != nil {
 				b.Fatal(err)
 			}
 			request.Header.Set("Content-Type", path.contentType)
-			if path.binary {
+			if path.codec != nil {
 				request.Header.Set("Accept", path.accept)
+			}
+			if path.ifMatch != "" {
 				request.Header.Set("If-Match", path.ifMatch)
 			}
 			request.Header.Set("Accept-Encoding", "identity")
@@ -259,8 +292,8 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 			if compressed == 1 && response.Header.Get("Content-Encoding") != "gzip" {
 				b.Fatalf("wire %s did not negotiate gzip", path.name)
 			}
-			if path.binary && response.Header.Get("Content-Type") != proto.ContentType() {
-				b.Fatalf("wire %s answered %q, want %q", path.name, response.Header.Get("Content-Type"), proto.ContentType())
+			if path.codec != nil && response.Header.Get("Content-Type") != path.codec.ContentType() {
+				b.Fatalf("wire %s answered %q, want %q", path.name, response.Header.Get("Content-Type"), path.codec.ContentType())
 			}
 			sizes[index] = len(data)
 			if compressed == 1 {
@@ -275,8 +308,8 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 				}
 			}
 			decoded := path.newMenu()
-			if path.binary {
-				err = proto.Unmarshal(data, decoded, endpoints["encode"].ResponseTypeDef, meta.Definitions)
+			if path.codec != nil {
+				err = path.codec.Unmarshal(data, decoded, endpoints["encode"].ResponseTypeDef, meta.Definitions)
 			} else {
 				err = json.Unmarshal(data, decoded)
 			}
@@ -284,7 +317,7 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 				b.Fatalf("wire %s changed menu: %v", path.name, err)
 			}
 		}
-		b.Logf("wire gzip=%t legacy=%d negotiated-json=%d negotiated-proto=%d generated-proto=%d", compressed == 1, sizes[0], sizes[1], sizes[2], sizes[3])
+		b.Logf("wire gzip=%t legacy=%d negotiated-json=%d negotiated-proto=%d generated-proto=%d jsonv2=%d gojson=%d msgpack=%d", compressed == 1, sizes[0], sizes[1], sizes[2], sizes[3], sizes[4], sizes[5], sizes[6])
 	}
 
 	// Validate each real client outside the measured blocks.
@@ -304,12 +337,12 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 			}
 		}
 	}
-	b.Logf("fixture: products=%d options/product=%d compact-JSON=%d protobuf=%d small-JSON=%d small-protobuf=%d",
-		len(typed.Products), len(typed.Products[0].Options), len(body), len(bodyProto), len(smallJSON), len(smallProto))
+	b.Logf("fixture: products=%d options/product=%d compact-JSON=%d protobuf=%d msgpack=%d small-JSON=%d small-protobuf=%d small-msgpack=%d",
+		len(typed.Products), len(typed.Products[0].Options), len(body), len(bodyProto), len(bodyMsgpack), len(smallJSON), len(smallProto), len(smallMsgpack))
 
 	cases := []struct {
 		name  string
-		calls [4]func() error
+		calls [pathCount]func() error
 	}{
 		{name: "server-large-response"},
 		{name: "server-large-request"},
@@ -320,10 +353,7 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 	}
 	for index, path := range paths {
 		for operation, method := range []string{"encode", "decode", "small"} {
-			requestBody := [][]byte{[]byte("{}"), body, smallJSON}[operation]
-			if path.binary {
-				requestBody = [][]byte{emptyProto, bodyProto, smallProto}[operation]
-			}
+			requestBody := path.requestBodies[operation]
 			cases[operation].calls[index] = func() error {
 				response, err := post(index, method, requestBody)
 				if err != nil {
@@ -356,10 +386,10 @@ func BenchmarkMenuNegotiationHTTP(b *testing.B) {
 			if b.N == 1 {
 				round++
 			}
-			for offset := range 4 {
+			for offset := range pathCount {
 				index := offset
 				if round%2 != 0 {
-					index = 3 - offset
+					index = pathCount - 1 - offset
 				}
 				start := time.Now()
 				for range b.N {

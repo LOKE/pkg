@@ -23,6 +23,37 @@ Fallbacks:
 - Mixed fleet during a rolling deploy: a binary POST that lands on a replica without codec support gets a non-JSON 400 or 415. The client treats it like a 412.
 - Old clients keep sending JSON and get JSON. `GET /rpc` and `GET /rpc/<service>` are byte-identical with or without codecs.
 
+## MessagePack
+
+`application/vnd.msgpack` is negotiated like protobuf (same OPTIONS probe, `Accept-Post`, `Accept`, and fallbacks) but it is schema free: fields are keyed by their JSON names, so a schema change cannot corrupt a message. A codec says so by implementing `lokerpc.SchemaFree`; the client then sends no `If-Match`, the server does not require one, and a schema change never produces a 412. Protobuf is unchanged.
+
+`msgpackcodec` uses tinylib/msgp generated `MarshalMsg`/`UnmarshalMsg` when a type has them (`//msgp:tag json`, `//msgp:newtime` for the MessagePack timestamp extension, `//msgp:timezone utc`, and a shim that carries `netip.Addr` as raw bytes) and falls back to vmihailenco/msgpack reflection with the `json` struct tag. The two read each other's bytes. The reflection encoder writes nil slices and maps as msgpack nil, which generated decoders reject, so the codec retries a failed generated decode by reflection. Generated code is in `fixtures/msgp_gen.go` and `fixtures/menuclient/msgp_gen.go`; `go generate ./...` rebuilds it and `gen/main_test.go` checks it is current.
+
+## Pluggable JSON
+
+`lokerpc.ServeJSON` and `lokerpc.ClientJSON` swap the JSON library behind request and response bodies. The wire format stays JSON and nothing is negotiated. Without the option the server and client run exactly the code they always did. With it, the server decodes the body straight into the endpoint's request type with the supplied implementation (endpoints without a request type keep the old path) and encodes responses with it.
+
+`jsonengines` provides two: `V2` (`encoding/json/v2`, default options) and `GoJSON` (github.com/goccy/go-json). Differences from `encoding/json` v1, pinned in `jsonengines/jsonengines_test.go`:
+
+- `V2` writes nil slices as `[]` and nil maps as `{}`; v1 and go-json write `null`. A client that tells nil from empty sees a difference.
+- `V2` matches member names case-sensitively; `{"NAME":"x"}` no longer fills `name`.
+- `V2` rejects duplicate member names and invalid UTF-8; v1 takes the last duplicate and replaces bad bytes with U+FFFD.
+- `V2` does not escape `<`, `>` and `&`; v1 and go-json write `\u003c` and friends.
+- Unknown members are ignored, `null` clears containers, and type mismatches and trailing data are errors, in all three.
+
+go-json follows v1 on every point above.
+
+Sonic was measured against go-json and dropped. Marshal and unmarshal of the 200-product menu on Apple M2 Pro, Go 1.27.2, median of 3, `-cpu 1`:
+
+| engine | marshal | unmarshal | unmarshal allocs |
+|---|---:|---:|---:|
+| encoding/json v1 (on v2 engine in 1.27) | 0.568 ms | 1.053 ms | 5,410 |
+| encoding/json/v2 | 0.566 ms | 0.797 ms | 5,410 |
+| sonic 1.15.4 | 0.469 ms | 0.321 ms | 806 |
+| go-json 0.11.2 | 0.117 ms | 0.267 ms | 606 |
+
+Sonic's native code does run on darwin/arm64 under Go 1.27: its build tags (`arm64 && go1.20 && !go1.28`) select the JIT-backed `sonic.go`, not the `compat.go` fallback to encoding/json, and the 806 allocations against v1's 5,410 confirm it. On darwin/arm64 its encoder is barely ahead of the standard library. On linux/amd64 sonic's SIMD paths are the primary target and would be expected to do better, but that is unmeasured here. Sonic stops compiling its native path at Go 1.28.
+
 ## Opting in
 
 ```go
@@ -35,6 +66,10 @@ client := MenuClient{lokerpc.NewClient(url+"/rpc/menu", lokerpc.ClientCodecs(pro
 ```
 
 `lokerpc.WithHTTPClient(*http.Client)` sets the HTTP client.
+
+## Go version
+
+The example module needs Go 1.27 (`encoding/json/v2`); the root module stays on 1.26. Run it with a 1.27 toolchain, for example `mise exec go@1.27.2 -- go test ./...`. Under 1.27 `encoding/json` v1 is implemented on the v2 engine, so the `legacy` benchmark path is faster than it is on 1.26.
 
 ## Running
 
@@ -60,22 +95,22 @@ Limitations of the generator: map keys must be string kinds, promoted fields thr
 
 ## Benchmark
 
-`BenchmarkMenuNegotiationHTTP` (`menu_bench_test.go`) sends a 200-product menu over loopback HTTP, with and without gzip, through four paths: `legacy` (service without codecs, plain client), `negotiated-json` (codec server, plain JSON client), `negotiated-proto` (codec server, protobuf client, reflection) and `generated-proto` (the same with generated code on both ends). It reports `<path>-ms/op` per case, runs the paths in adjacent blocks and reverses their order each `-count` round, and logs wire sizes before timing.
+`BenchmarkMenuNegotiationHTTP` (`menu_bench_test.go`) sends a 200-product menu over loopback HTTP, with and without gzip, through seven paths: `legacy` (service without codecs, plain client), `negotiated-json` (codec server, plain JSON client), `negotiated-proto` (codec server, protobuf client, reflection), `generated-proto` (the same with generated code on both ends), `jsonv2` and `gojson` (the JSON option on both ends, no negotiation) and `msgpack` (negotiated MessagePack, msgp generated code on both ends). It reports `<path>-ms/op` per case, runs the paths in adjacent blocks and reverses their order each `-count` round, and logs wire sizes before timing.
 
-Results on an Apple M2 Pro, `-cpu 1 -count 9`, median ms per request. Bold beat legacy in at least 7 of 9 rounds. The Connect proto column is `BenchmarkMenuBridgeHTTP` from the `lokerpc/v2` PR run back to back on the same machine, for comparison.
+Results on an Apple M2 Pro with Go 1.27.2, `-cpu 1 -count 9`, median ms per request. Bold beat legacy in at least 7 of 9 rounds. The Connect proto column is `BenchmarkMenuBridgeHTTP` from the `lokerpc/v2` PR, built with the same Go and run back to back on the same machine.
 
-| Case | Legacy | Negotiated JSON | Negotiated proto | Generated proto | Connect proto (v2) |
-|---|---:|---:|---:|---:|---:|
-| Server, large response | 0.605 | 0.602 | **0.584** | **0.223** | 0.243 |
-| Server, large request | 5.115 | 5.149 | **0.711** | **0.559** | 0.528 |
-| Server, small | 0.038 | 0.038 | 0.039 | 0.039 | 0.042 |
-| End to end, large, gzip off | 3.448 | 3.532 | **1.149** | **0.627** | 0.619 |
-| End to end, large, gzip on | 4.444 | 4.426 | **1.835** | **1.407** | 1.471 |
-| End to end, small | 0.044 | 0.044 | 0.043 | 0.042 | 0.040 |
+| Case | Legacy | Negotiated JSON | json/v2 | go-json | Negotiated proto | Generated proto | MessagePack | Connect proto (v2) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Server, large response | 0.650 | 0.632 | 0.754 | **0.269** | 0.686 | **0.284** | **0.227** | 0.257 |
+| Server, large request | 2.367 | 2.360 | **1.175** | **0.588** | **0.733** | **0.600** | **0.519** | 0.608 |
+| Server, small | 0.041 | 0.043 | 0.041 | 0.040 | 0.043 | 0.042 | 0.041 | 0.047 |
+| End to end, large, gzip off | 2.254 | **2.162** | **1.699** | **0.691** | **1.222** | **0.803** | **0.581** | 0.660 |
+| End to end, large, gzip on | 2.987 | 3.016 | **2.468** | **1.459** | **1.859** | **1.450** | **1.331** | 1.355 |
+| End to end, small | 0.052 | **0.051** | 0.050 | **0.045** | 0.047 | 0.047 | **0.047** | 0.045 |
 
-Response bytes: legacy JSON 417,905 (4,186 gzipped), negotiated proto 365,894 (3,690 gzipped), Connect proto 365,690 (3,693 gzipped).
+Response bytes (gzipped in brackets): JSON 417,905 (5,026), protobuf 365,894 (3,772), MessagePack 391,903 (4,591).
 
-With reflection, decoding is where the win is; encoding runs at about the same speed as `encoding/json`. Generated code removes that gap and lands level with Connect's generated protobuf in every case.
+On Go 1.26 the legacy large request took 5.1 ms and end to end 3.4 ms; Go 1.27 runs encoding/json v1 on the v2 engine, which halves the decode cost for free. go-json on both ends, with no wire change and no negotiation, lands level with generated protobuf and Connect. MessagePack with msgp generated code is the fastest path in every large case.
 
 A Cap'n Proto codec was also tried and removed. Unpacked and with a pooled arena it still lost to protobuf on a 200-item round trip (median about 800,000 ns/op against 638,000, and 63,240 wire bytes against 35,666), because go-capnp's schema-less API and the larger payload cost more than the reflection work it saves.
 

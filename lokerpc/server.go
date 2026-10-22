@@ -68,6 +68,7 @@ type Service struct {
 
 	endpointCodecs EndpointCodecMap
 	codecs         []Codec
+	json           JSON
 }
 
 // NewService creates a new Service
@@ -228,7 +229,7 @@ func NewServer(serviceName string, ecm EndpointCodecMap, logger log.Logger) http
 	for methodName, ec := range ecm {
 		l := log.With(logger, "rpc_service", serviceName, "method", methodName)
 
-		mux.HandleFunc("/"+methodName, makeHandler(l, ec, nil))
+		mux.HandleFunc("/"+methodName, makeHandler(l, ec, nil, nil))
 		meta.Interfaces = append(meta.Interfaces, EndpointMeta{
 			MethodName:    methodName,
 			MethodTimeout: 60000,
@@ -331,7 +332,7 @@ func MountHandlers(logger log.Logger, mux Mux, services ...*Service) {
 
 		for i, methodName := range methodNames {
 			l := log.With(logger, "rpc_service", service.Name, "method", methodName)
-			mux.Handle("/rpc/"+service.Name+"/"+methodName, makeHandler(l, ecm[methodName], negotiation.forEndpoint(i)))
+			mux.Handle("/rpc/"+service.Name+"/"+methodName, makeHandler(l, ecm[methodName], negotiation.forEndpoint(i), service.json))
 		}
 
 		// service meta endpoint
@@ -427,7 +428,7 @@ func wrapEndpoint(handlerName string, e Endpoint) Endpoint {
 	}
 }
 
-func makeHandler(logger log.Logger, ec EndpointCodec, neg *endpointNegotiation) http.HandlerFunc {
+func makeHandler(logger log.Logger, ec EndpointCodec, neg *endpointNegotiation, jsonImpl JSON) http.HandlerFunc {
 	logErr := level.Error(logger).Log
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -438,7 +439,8 @@ func makeHandler(logger log.Logger, ec EndpointCodec, neg *endpointNegotiation) 
 		ctx := r.Context()
 
 		requestCodec, responseCodec := neg.codecsFor(r)
-		if (requestCodec != nil || responseCodec != nil) && r.Header.Get("If-Match") != neg.etag {
+		needsMatch := requestCodec != nil && !isSchemaFree(requestCodec) || responseCodec != nil && !isSchemaFree(responseCodec)
+		if needsMatch && r.Header.Get("If-Match") != neg.etag {
 			writeJSONError(w, http.StatusPreconditionFailed, "schema changed")
 			return
 		}
@@ -459,6 +461,19 @@ func makeHandler(logger log.Logger, ec EndpointCodec, neg *endpointNegotiation) 
 			err = requestCodec.Unmarshal(body, req.Interface(), neg.requestSchema, neg.defs)
 			if err != nil {
 				writeJSONError(w, http.StatusBadRequest, "Invalid request: "+err.Error())
+				return
+			}
+			reqParams = req.Elem().Interface()
+		case jsonImpl != nil && ec.requestType != nil:
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				writeBadReq(w, "JSON could not be decoded: %v", err)
+				return
+			}
+			req := reflect.New(ec.requestType)
+			err = jsonImpl.Unmarshal(body, req.Interface())
+			if err != nil {
+				writeBadReq(w, "Invalid request: %v", err)
 				return
 			}
 			reqParams = req.Elem().Interface()
@@ -521,6 +536,19 @@ func makeHandler(logger log.Logger, ec EndpointCodec, neg *endpointNegotiation) 
 			}
 			w.Header().Set("Content-Type", responseCodec.ContentType())
 			w.Header().Set("Vary", "Accept")
+			w.WriteHeader(status)
+			_, _ = w.Write(body)
+			return
+		}
+
+		if jsonImpl != nil {
+			body, err := jsonImpl.Marshal(result)
+			if err != nil {
+				logErr("msg", "response encode error", "err", err)
+				writeJSONError(w, http.StatusInternalServerError, "response could not be encoded")
+				return
+			}
+			w.Header().Set("Content-Type", ContentType)
 			w.WriteHeader(status)
 			_, _ = w.Write(body)
 			return

@@ -1,7 +1,9 @@
 package lokerpc
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +15,17 @@ import (
 	"github.com/go-kit/log"
 )
 
+// strictJSON rejects unknown fields, which encoding/json accepts by default.
+type strictJSON struct{}
+
+func (strictJSON) Marshal(v any) ([]byte, error) { return json.Marshal(v) }
+
+func (strictJSON) Unmarshal(data []byte, v any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(v)
+}
+
 func TestMountHandlers(t *testing.T) {
 	// A basic type for requests and responses
 	type Foo struct {
@@ -23,6 +36,7 @@ func TestMountHandlers(t *testing.T) {
 		name          string
 		req           *http.Request
 		endpointCoded EndpointCodec
+		serviceOpts   []ServiceOption
 		wantBody      string
 		wantStatus    int
 	}{
@@ -34,6 +48,45 @@ func TestMountHandlers(t *testing.T) {
 			}, ""),
 			wantBody:   `{"foo":"baz"}`,
 			wantStatus: 200,
+		},
+		{
+			name: "default engine ignores unknown request fields",
+			req:  httptest.NewRequest("POST", "/rpc/service1/basic", strings.NewReader(`{"foo":"bar","extra":1}`)),
+			endpointCoded: MakeStandardEndpointCodec(func(ctx context.Context, req Foo) (Foo, error) {
+				return Foo{"baz"}, nil
+			}, ""),
+			wantBody:   `{"foo":"baz"}`,
+			wantStatus: 200,
+		},
+		{
+			name: "custom JSON engine decodes and encodes",
+			req:  httptest.NewRequest("POST", "/rpc/service1/basic", strings.NewReader(`{"foo":"bar"}`)),
+			endpointCoded: MakeStandardEndpointCodec(func(ctx context.Context, req Foo) (Foo, error) {
+				return Foo{"baz"}, nil
+			}, ""),
+			serviceOpts: []ServiceOption{ServeJSON(strictJSON{})},
+			wantBody:    `{"foo":"baz"}`,
+			wantStatus:  200,
+		},
+		{
+			name: "custom JSON engine rejects unknown request fields",
+			req:  httptest.NewRequest("POST", "/rpc/service1/basic", strings.NewReader(`{"foo":"bar","extra":1}`)),
+			endpointCoded: MakeStandardEndpointCodec(func(ctx context.Context, req Foo) (Foo, error) {
+				return Foo{"baz"}, nil
+			}, ""),
+			serviceOpts: []ServiceOption{ServeJSON(strictJSON{})},
+			wantBody:    `Invalid request: json: unknown field "extra"`,
+			wantStatus:  400,
+		},
+		{
+			name: "custom JSON engine keeps error responses",
+			req:  httptest.NewRequest("POST", "/rpc/service1/basic", strings.NewReader(`{}`)),
+			endpointCoded: MakeStandardEndpointCodec(func(ctx context.Context, req struct{}) (*struct{}, error) {
+				return nil, errors.NewPublicError("public_error_code", "Some public error")
+			}, ""),
+			serviceOpts: []ServiceOption{ServeJSON(strictJSON{})},
+			wantBody:    `{"message":"Some public error","expose":true,"code":"public_error_code","type":"public_error_code"}`,
+			wantStatus:  400,
 		},
 		{
 			name: "public error",
@@ -104,7 +157,7 @@ func TestMountHandlers(t *testing.T) {
 				mux,
 				NewService("service1", "", EndpointCodecMap{
 					"basic": tt.endpointCoded,
-				}),
+				}, tt.serviceOpts...),
 			)
 
 			rr := httptest.NewRecorder()

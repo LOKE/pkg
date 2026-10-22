@@ -16,6 +16,7 @@ import (
 
 	"github.com/LOKE/pkg/errors"
 	"github.com/LOKE/pkg/examples/negotiate/fixtures"
+	"github.com/LOKE/pkg/examples/negotiate/msgpackcodec"
 	"github.com/LOKE/pkg/examples/negotiate/protocodec"
 	"github.com/LOKE/pkg/lokerpc"
 	kitlog "github.com/go-kit/log"
@@ -35,10 +36,17 @@ func (w *etagStripper) WriteHeader(status int) {
 type testCodec struct {
 	name  string
 	codec lokerpc.Codec
+	// emptyAsNil is true when empty slices and maps decode as nil.
+	emptyAsNil bool
+	// schemaFree codecs name their fields, so If-Match and 412 do not apply.
+	schemaFree bool
+	// rangeChecked codecs reject Go ints that don't fit the schema's int32.
+	rangeChecked bool
 }
 
 var testCodecs = []testCodec{
-	{"protobuf", protocodec.New()},
+	{"protobuf", protocodec.New(), true, false, true},
+	{"msgpack", msgpackcodec.New(), false, true, false},
 }
 
 var compareOpts = cmp.Options{
@@ -144,15 +152,15 @@ var utcPlus10 = time.FixedZone("UTC+10", 10*60*60)
 var edgeTests = []struct {
 	name  string
 	edge  fixtures.Edge
-	check func(t *testing.T, got fixtures.Edge)
+	check func(t *testing.T, tc testCodec, got fixtures.Edge)
 }{
 	{name: "zero value"},
-	{name: "optional int absent", edge: fixtures.Edge{Negative: 1}, check: func(t *testing.T, got fixtures.Edge) {
+	{name: "optional int absent", edge: fixtures.Edge{Negative: 1}, check: func(t *testing.T, tc testCodec, got fixtures.Edge) {
 		if got.OptInt != nil {
 			t.Errorf("OptInt = %d, want nil", *got.OptInt)
 		}
 	}},
-	{name: "optional int pointer to zero", edge: fixtures.Edge{OptInt: new(0)}, check: func(t *testing.T, got fixtures.Edge) {
+	{name: "optional int pointer to zero", edge: fixtures.Edge{OptInt: new(0)}, check: func(t *testing.T, tc testCodec, got fixtures.Edge) {
 		if got.OptInt == nil || *got.OptInt != 0 {
 			t.Errorf("OptInt = %v, want pointer to 0", got.OptInt)
 		}
@@ -161,7 +169,7 @@ var edgeTests = []struct {
 	{name: "positive extremes", edge: fixtures.Edge{OptInt: new(math.MaxInt32), Negative: math.MaxInt32, Small: 127}},
 	{name: "floats", edge: fixtures.Edge{Float32: -1.5, Float64: math.SmallestNonzeroFloat64}},
 	{name: "nested slices", edge: fixtures.Edge{Matrix: [][]int{{1, 2}, {}, {3, -4}}}},
-	{name: "nullable elements", edge: fixtures.Edge{Pointers: []*string{new("a"), nil, new("")}}, check: func(t *testing.T, got fixtures.Edge) {
+	{name: "nullable elements", edge: fixtures.Edge{Pointers: []*string{new("a"), nil, new("")}}, check: func(t *testing.T, tc testCodec, got fixtures.Edge) {
 		if len(got.Pointers) != 3 || got.Pointers[1] != nil || got.Pointers[2] == nil {
 			t.Errorf("Pointers = %v, want [a nil ptr-to-empty]", got.Pointers)
 		}
@@ -173,9 +181,10 @@ var edgeTests = []struct {
 	{name: "any field", edge: fixtures.Edge{Anything: map[string]any{"k": []any{1.0, "two", nil, true}}}},
 	{name: "hyphenated key and unicode", edge: fixtures.Edge{Hyphenated: "ünï-☃-\x00"}},
 	{name: "text marshaler", edge: fixtures.Edge{Addr: netip.MustParseAddr("2001:db8::1")}},
-	{name: "empty slices and maps", edge: fixtures.Edge{Names: []string{}, Matrix: [][]int{}, Groups: map[string][]int{}}, check: func(t *testing.T, got fixtures.Edge) {
-		if got.Names != nil || got.Matrix != nil || got.Groups != nil {
-			t.Errorf("want empty containers to decode as nil, got %#v %#v %#v", got.Names, got.Matrix, got.Groups)
+	{name: "empty slices and maps", edge: fixtures.Edge{Names: []string{}, Matrix: [][]int{}, Groups: map[string][]int{}}, check: func(t *testing.T, tc testCodec, got fixtures.Edge) {
+		isNil := got.Names == nil && got.Matrix == nil && got.Groups == nil
+		if isNil != tc.emptyAsNil {
+			t.Errorf("empty containers decoded as nil = %v, want %v", isNil, tc.emptyAsNil)
 		}
 	}},
 }
@@ -388,6 +397,13 @@ func TestNegotiation(t *testing.T) {
 				t.Fatalf("call after schema change mismatch (-want +got):\n%s", diff)
 			}
 			exchanges := recorder.Take()
+			if tc.schemaFree {
+				if len(exchanges) != 1 || exchanges[0].Status != http.StatusOK ||
+					exchanges[0].RequestType != tc.codec.ContentType() || exchanges[0].ResponseType != tc.codec.ContentType() || exchanges[0].IfMatch != "" {
+					t.Fatalf("want one binary POST without If-Match and no 412, got %+v", exchanges)
+				}
+				return
+			}
 			if len(exchanges) != 2 ||
 				exchanges[0].Status != http.StatusPreconditionFailed ||
 				exchanges[0].RequestType != tc.codec.ContentType() ||
@@ -560,7 +576,7 @@ func TestNegotiation(t *testing.T) {
 			}
 			for header, want := range map[string]string{
 				"Allow":         "GET, POST, OPTIONS",
-				"Accept-Post":   "application/json, application/x-protobuf",
+				"Accept-Post":   "application/json, application/x-protobuf, application/vnd.msgpack",
 				"Cache-Control": "max-age=300",
 			} {
 				if got := res.Header.Get(header); got != want {
@@ -596,10 +612,21 @@ func TestNegotiation(t *testing.T) {
 			}{
 				{"garbage body", "getMenu", map[string]string{"Content-Type": contentType, "If-Match": etag}, []byte("\xff\xff\xffgarbage\x00\x01"), 400, "Invalid request"},
 				{"truncated body", "getMenu", map[string]string{"Content-Type": contentType, "If-Match": etag}, []byte{0x0a, 0x7f, 0x01}, 400, "Invalid request"},
-				{"wrong If-Match", "getMenu", map[string]string{"Content-Type": contentType, "If-Match": `"stale"`}, nil, 412, `{"message":"schema changed"}`},
-				{"missing If-Match", "getMenu", map[string]string{"Content-Type": contentType}, nil, 412, `{"message":"schema changed"}`},
-				{"binary Accept with wrong If-Match", "getMenu", map[string]string{"Content-Type": "application/json", "Accept": contentType, "If-Match": `"stale"`}, []byte(`{}`), 412, `{"message":"schema changed"}`},
 				{"codec on endpoint without request type", "custom", map[string]string{"Content-Type": contentType, "If-Match": etag}, nil, 415, "does not support"},
+			}
+			if !tc.schemaFree {
+				tests = append(tests, []struct {
+					name       string
+					path       string
+					headers    map[string]string
+					body       []byte
+					wantStatus int
+					wantBody   string
+				}{
+					{"wrong If-Match", "getMenu", map[string]string{"Content-Type": contentType, "If-Match": `"stale"`}, nil, 412, `{"message":"schema changed"}`},
+					{"missing If-Match", "getMenu", map[string]string{"Content-Type": contentType}, nil, 412, `{"message":"schema changed"}`},
+					{"binary Accept with wrong If-Match", "getMenu", map[string]string{"Content-Type": "application/json", "Accept": contentType, "If-Match": `"stale"`}, []byte(`{}`), 412, `{"message":"schema changed"}`},
+				}...)
 			}
 			for _, tt := range tests {
 				t.Run(tt.name, func(t *testing.T) {
@@ -616,7 +643,25 @@ func TestNegotiation(t *testing.T) {
 				})
 			}
 
+			t.Run("schema free codec ignores If-Match", func(t *testing.T) {
+				if !tc.schemaFree {
+					t.Skip("codec is schema bound")
+				}
+				request, err := tc.codec.Marshal(GetMenuRequest{MenuID: "x"}, nil, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, ifMatch := range []string{"", `"stale"`} {
+					headers := map[string]string{"Content-Type": contentType, "Accept": contentType, "If-Match": ifMatch}
+					res, _ := rawRequest(t, http.MethodPost, server.URL+"/rpc/menu/getMenu", headers, request)
+					if res.StatusCode != 200 || res.Header.Get("Content-Type") != contentType {
+						t.Errorf("If-Match %q: status=%d type=%q", ifMatch, res.StatusCode, res.Header.Get("Content-Type"))
+					}
+				}
+			})
+
 			t.Run("JSON request, binary Accept", func(t *testing.T) {
+
 				headers := map[string]string{"Content-Type": "application/json", "Accept": contentType + ", application/json;q=0.5", "If-Match": etag}
 				res, _ := rawRequest(t, http.MethodPost, server.URL+"/rpc/menu/getMenu", headers, []byte(`{"menuId":"x"}`))
 				if res.StatusCode != 200 || res.Header.Get("Content-Type") != contentType || res.Header.Get("Vary") != "Accept" {
@@ -643,7 +688,7 @@ func TestNegotiation(t *testing.T) {
 						t.Errorf("binary differs from JSON (-json +binary):\n%s", diff)
 					}
 					if tt.check != nil {
-						tt.check(t, viaBinary)
+						tt.check(t, tc, viaBinary)
 					}
 					for _, exchange := range recorder.Take() {
 						if exchange.Method == http.MethodPost && exchange.ResponseType != tc.codec.ContentType() {
@@ -670,6 +715,9 @@ func TestNegotiation(t *testing.T) {
 			})
 
 			t.Run("int overflow is an error", func(t *testing.T) {
+				if !tc.rangeChecked {
+					t.Skip("codec has no int32 range check")
+				}
 				recorder.Take()
 				var res fixtures.Edge
 				err := binaryClient.DoRequest(context.Background(), "echo", fixtures.Edge{Negative: math.MaxInt32 + 1}, &res)

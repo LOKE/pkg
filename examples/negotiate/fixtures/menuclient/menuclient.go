@@ -3,6 +3,12 @@
 // is generated from that JTD file, not from the structs.
 package menuclient
 
+//go:generate go run github.com/tinylib/msgp -file menuclient.go -o msgp_gen.go -io=false -tests=false
+
+//msgp:tag json
+//msgp:newtime
+//msgp:timezone utc
+
 type Menu struct {
 	Products []Product `json:"products"`
 }

@@ -19,6 +19,25 @@ type Codec interface {
 	Unmarshal(data []byte, v any, schema *jtd.Schema, defs map[string]jtd.Schema) error
 }
 
+// SchemaFree is implemented by codecs whose wire format carries field names
+// (like MessagePack), so a schema change cannot corrupt a message. Requests in
+// such a codec need no If-Match and never get a 412.
+type SchemaFree interface {
+	SchemaFree() bool
+}
+
+func isSchemaFree(codec Codec) bool {
+	schemaFree, ok := codec.(SchemaFree)
+	return ok && schemaFree.SchemaFree()
+}
+
+// JSON is a replaceable JSON implementation. The wire format stays JSON; this
+// only swaps the engine that reads and writes request and response bodies.
+type JSON interface {
+	Marshal(v any) ([]byte, error)
+	Unmarshal(data []byte, v any) error
+}
+
 // ServiceOption configures a Service.
 type ServiceOption func(*Service)
 
@@ -27,6 +46,14 @@ type ServiceOption func(*Service)
 func ServeCodecs(codecs ...Codec) ServiceOption {
 	return func(s *Service) {
 		s.codecs = codecs
+	}
+}
+
+// ServeJSON makes the service decode request bodies straight into the endpoint's
+// request type and encode responses with j, instead of encoding/json.
+func ServeJSON(j JSON) ServiceOption {
+	return func(s *Service) {
+		s.json = j
 	}
 }
 
@@ -39,6 +66,13 @@ func ClientCodecs(codecs ...Codec) ClientOption {
 	return func(c *Client) {
 		c.codecs = codecs
 		c.session = &clientSession{}
+	}
+}
+
+// ClientJSON makes the client encode request bodies and decode responses with j.
+func ClientJSON(j JSON) ClientOption {
+	return func(c *Client) {
+		c.json = j
 	}
 }
 

@@ -3,6 +3,13 @@
 // code lives next to it in proto_gen.go; regenerate with go generate ./...
 package fixtures
 
+//go:generate go run github.com/tinylib/msgp -file fixtures.go -o msgp_gen.go -io=false -tests=false
+
+//msgp:tag json
+//msgp:newtime
+//msgp:timezone utc
+//msgp:shim netip.Addr as:[]byte using:addrToBytes/addrFromBytes mode:cast
+
 import (
 	"fmt"
 	"net/netip"

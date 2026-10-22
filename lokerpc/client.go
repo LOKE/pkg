@@ -85,6 +85,7 @@ type Client struct {
 
 	codecs  []Codec
 	session *clientSession
+	json    JSON
 }
 
 func normalizeBaseURL(baseURL string) string {
@@ -150,7 +151,7 @@ func (c Client) DoRequest(ctx context.Context, method string, args, result any) 
 		if res.ContentLength == 0 {
 			return nil
 		}
-		if err := json.NewDecoder(res.Body).Decode(result); err != nil {
+		if err := c.decodeJSON(res.Body, result); err != nil {
 			return fmt.Errorf("Error decoding rpc response: %v", err)
 		}
 	case http.StatusNoContent:
@@ -159,7 +160,7 @@ func (c Client) DoRequest(ctx context.Context, method string, args, result any) 
 		return fmt.Errorf("Error rpc method not found: %v", url)
 	default:
 		err := &rpcClientError{}
-		jsonErr := json.NewDecoder(res.Body).Decode(err)
+		jsonErr := c.decodeJSON(res.Body, err)
 		if jsonErr != nil {
 			return fmt.Errorf("Error decoding rpc error response: %v", jsonErr)
 		}
@@ -182,6 +183,12 @@ func (c Client) send(ctx context.Context, url, method string, args any, session 
 		}
 		body.Write(encoded)
 		contentType = session.codec.ContentType()
+	} else if c.json != nil {
+		encoded, err := c.json.Marshal(args)
+		if err != nil {
+			return nil, err
+		}
+		body.Write(encoded)
 	} else {
 		err := json.NewEncoder(&body).Encode(args)
 		if err != nil {
@@ -197,7 +204,9 @@ func (c Client) send(ctx context.Context, url, method string, args any, session 
 	req.Header.Set("Content-Type", contentType)
 
 	if known {
-		req.Header.Set("If-Match", session.etag)
+		if !isSchemaFree(session.codec) {
+			req.Header.Set("If-Match", session.etag)
+		}
 		if endpoint.ResponseTypeDef != nil {
 			req.Header.Set("Accept", session.codec.ContentType()+", application/json;q=0.5")
 		}
@@ -256,4 +265,15 @@ func binaryRejected(res *http.Response) bool {
 		return err != nil || mediaType != "application/json"
 	}
 	return false
+}
+
+func (c Client) decodeJSON(body io.Reader, v any) error {
+	if c.json == nil {
+		return json.NewDecoder(body).Decode(v)
+	}
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return err
+	}
+	return c.json.Unmarshal(data, v)
 }

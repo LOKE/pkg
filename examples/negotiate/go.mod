@@ -1,12 +1,15 @@
 module github.com/LOKE/pkg/examples/negotiate
 
-go 1.26
+go 1.27
 
 require (
 	github.com/LOKE/pkg v0.0.0-00010101000000-000000000000
 	github.com/go-kit/log v0.2.1
+	github.com/goccy/go-json v0.11.2
 	github.com/google/go-cmp v0.7.0
 	github.com/jsontypedef/json-typedef-go v0.0.0-20200503043955-4280071bd745
+	github.com/tinylib/msgp v1.6.5
+	github.com/vmihailenco/msgpack/v5 v5.4.1
 	google.golang.org/protobuf v1.36.12
 )
 
@@ -16,13 +19,19 @@ require (
 	github.com/go-logfmt/logfmt v0.5.1 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
+	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/prometheus/client_golang v1.12.2 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.37.0 // indirect
 	github.com/prometheus/procfs v0.8.0 // indirect
+	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
+	golang.org/x/mod v0.18.0 // indirect
 	golang.org/x/sys v0.26.0 // indirect
+	golang.org/x/tools v0.22.0 // indirect
 )
 
 replace github.com/LOKE/pkg => ../..
 
 replace github.com/jsontypedef/json-typedef-go => github.com/bjoerndemeyer/json-typedef-go v0.0.0-20220414232847-142ee3fbe3ef
+
+tool github.com/tinylib/msgp
