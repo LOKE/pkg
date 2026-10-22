@@ -112,12 +112,15 @@ The bridge uses a dedicated `loke-legacy-json` codec to write default-valued
 protobuf JSON directly into Connect's reusable response buffer, avoiding a
 dynamic-message decode and second encode. Generated open messages without
 presence fields or maps use cached struct-field plans and prequoted JSON keys;
-string encoding scans plain ASCII eight bytes at a time. Standalone marshaling
-reuses a pooled scratch buffer. Other messages retain protobuf reflection,
-sorted maps and protobuf JSON scalar formatting. Well-known types and proto2
-messages use `protojson` for their specialized semantics. Requests
-retain `protojson` validation and unknown-field handling, with a fast path for
-empty ordinary messages. Native Connect JSON, handler options and compression
+string encoding scans plain ASCII eight bytes at a time. Bounded previous-size
+hints avoid repeated response-buffer growth; standalone marshaling reuses pooled
+scratch storage, and the bridge pools request-body buffers up to 8 MiB. Other
+messages retain protobuf reflection, sorted maps and protobuf JSON scalar
+formatting. Well-known types and proto2 messages use `protojson` for their
+specialized semantics. Generated open requests also use a compiled scanner and
+contiguous repeated-message storage. Unsupported input forms and failed parses
+replay `protojson`, retaining unknown-field handling, exact validation errors and
+partially decoded messages. Native Connect JSON, handler options and compression
 behavior are unchanged; the bridge codec is not exposed on native Connect routes.
 As in the TypeScript bridge, send-size limits apply to the default-filled JSON
 bytes actually returned by the bridge, rather than the smaller native Connect

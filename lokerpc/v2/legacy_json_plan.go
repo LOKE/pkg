@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -14,7 +15,8 @@ import (
 // Compile generated open fields once so the hot walk avoids protobuf
 // reflection's per-list boxing. Unsupported shapes keep the reflection path.
 type legacyMessagePlan struct {
-	fields []legacyFieldPlan
+	fields      []legacyFieldPlan
+	encodedSize atomic.Int64
 }
 
 type legacyFieldPlan struct {

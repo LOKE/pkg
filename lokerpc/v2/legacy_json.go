@@ -27,6 +27,9 @@ func (legacyJSONCodec) Name() string { return "loke-legacy-json" }
 
 var legacyMarshal = protojson.MarshalOptions{EmitDefaultValues: true}
 
+// A large outlier must not make every subsequent small response reserve megabytes.
+const legacySizeHintLimit = 512 << 10
+
 // Protojson deliberately varies comma whitespace between binaries. Probe once
 // rather than depending on protobuf's internal implementation or normalizing
 // strings (which would also risk changing string values).
@@ -94,7 +97,17 @@ func (legacyJSONCodec) MarshalAppend(data []byte, value any) ([]byte, error) {
 	original := data
 	var err error
 	if plan := legacyPlan(reflect.TypeOf(message), message.ProtoReflect().Descriptor()); plan != nil {
+		// A pool miss should allocate once, not grow through every size class.
+		// Connect owns and recycles the returned buffer after writing it.
+		if size := int(plan.encodedSize.Load()); size > cap(data)-len(data) {
+			grown := make([]byte, len(data), len(data)+size)
+			copy(grown, data)
+			data = grown
+		}
 		data, err = plan.append(data, reflect.ValueOf(message).Elem(), 0)
+		if err == nil {
+			plan.encodedSize.Store(int64(min(len(data)-len(original), legacySizeHintLimit)))
+		}
 	} else {
 		data, err = appendLegacyMessage(data, message.ProtoReflect(), 0)
 	}
@@ -120,7 +133,7 @@ func (legacyJSONCodec) Unmarshal(data []byte, value any) error {
 		proto.Reset(message)
 		return nil
 	}
-	return (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(data, message)
+	return unmarshalLegacyJSON(data, message)
 }
 
 func legacyOrdinaryMessage(descriptor protoreflect.MessageDescriptor) bool {

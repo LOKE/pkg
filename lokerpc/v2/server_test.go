@@ -941,3 +941,25 @@ func TestBridgeRejectsUnsupportedContentEncoding(t *testing.T) {
 		t.Errorf("unsupported encodings invoked Echo %d times", calls)
 	}
 }
+
+type failedBridgeBody struct{}
+
+func (failedBridgeBody) Read(body []byte) (int, error) {
+	return copy(body, "partial stale request"), errors.New("request body failed")
+}
+
+func TestBridgeRequestBufferReuse(t *testing.T) {
+	mux := mountFixture(t, fixtureService("fixture", fixtureHandler{}))
+	for _, text := range []string{strings.Repeat("x", 10000), "", "short"} {
+		response := serve(t, mux, http.MethodPost, "/rpc/fixture/echo", `{"stringValue":"`+text+`"}`)
+		if response.Code != http.StatusOK || decodeObject(t, response)["stringValue"] != text {
+			t.Fatalf("echo = %d %s", response.Code, response.Body.String())
+		}
+		request := httptest.NewRequest(http.MethodPost, "/rpc/fixture/echo", failedBridgeBody{})
+		failure := httptest.NewRecorder()
+		mux.ServeHTTP(failure, request)
+		if failure.Code != http.StatusBadRequest || decodeObject(t, failure)["message"] != "Invalid JSON" {
+			t.Fatalf("read failure = %d %s", failure.Code, failure.Body.String())
+		}
+	}
+}

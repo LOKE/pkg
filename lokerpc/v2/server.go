@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -230,6 +231,8 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
+var legacyRequestBuffers = sync.Pool{New: func() any { return new(bytes.Buffer) }}
+
 func bridge(logger log.Logger, serviceName, servicePath string, handler http.Handler, descriptor protoreflect.ServiceDescriptor) http.Handler {
 	logger = log.With(logger, "rpc_service", serviceName)
 	methods := make(map[string]protoreflect.MethodDescriptor)
@@ -278,7 +281,16 @@ func bridge(logger log.Logger, serviceName, servicePath string, handler http.Han
 			writeJSON(w, http.StatusUnsupportedMediaType, errorBody{Message: failureMessage})
 			return
 		}
-		body, err := io.ReadAll(r.Body)
+		requestBuffer := legacyRequestBuffers.Get().(*bytes.Buffer)
+		defer func() {
+			requestBuffer.Reset()
+			// Match Connect's upper bound for recyclable buffers.
+			if requestBuffer.Cap() <= 8<<20 {
+				legacyRequestBuffers.Put(requestBuffer)
+			}
+		}()
+		_, err := io.Copy(requestBuffer, r.Body)
+		body := requestBuffer.Bytes()
 		if err != nil {
 			failure, failureMessage = "invalid_argument", "Invalid JSON"
 			writeJSON(w, http.StatusBadRequest, errorBody{Message: failureMessage})

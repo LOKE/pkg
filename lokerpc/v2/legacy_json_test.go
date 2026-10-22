@@ -285,3 +285,40 @@ func TestLegacyJSONPlanScalarKinds(t *testing.T) {
 		}
 	}
 }
+
+func TestLegacyJSONPlanBufferSizing(t *testing.T) {
+	codec := legacyJSONCodec{}
+	for _, length := range []int{1000, 10, 10000, 0} {
+		message := &testpb.BenchmarkOption{Name: strings.Repeat("a", length)}
+		for _, capacity := range []int{0, 32, 20000} {
+			prefix := append(make([]byte, 0, capacity), "prefix:"...)
+			want, err := legacyMarshal.MarshalAppend(bytes.Clone(prefix), message)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := codec.MarshalAppend(prefix, message)
+			if err != nil || !bytes.Equal(got, want) {
+				t.Fatalf("length %d capacity %d: got %s (%v), want %s", length, capacity, got, err, want)
+			}
+		}
+	}
+	message := &testpb.BenchmarkOption{Name: strings.Repeat("a", 10000)}
+	if _, err := codec.MarshalAppend(nil, message); err != nil {
+		t.Fatal(err)
+	}
+	if allocations := testing.AllocsPerRun(100, func() {
+		if _, err := codec.MarshalAppend(nil, message); err != nil {
+			t.Fatal(err)
+		}
+	}); allocations != 1 {
+		t.Fatalf("warmed-up encoder allocated %v times, want one response buffer", allocations)
+	}
+	message.Name = strings.Repeat("x", legacySizeHintLimit*2)
+	if _, err := codec.MarshalAppend(nil, message); err != nil {
+		t.Fatal(err)
+	}
+	plan := legacyPlan(reflect.TypeOf(message), message.ProtoReflect().Descriptor())
+	if size := plan.encodedSize.Load(); size != legacySizeHintLimit {
+		t.Fatalf("outlier capacity hint = %d, want %d", size, legacySizeHintLimit)
+	}
+}
