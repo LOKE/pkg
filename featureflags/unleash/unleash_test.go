@@ -1,6 +1,8 @@
 package unleash
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -58,7 +60,7 @@ func TestStrategies(t *testing.T) {
 	}
 }
 
-func TestAsProvider(t *testing.T) {
+func TestNew(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/client/features" {
 			return
@@ -68,30 +70,38 @@ func TestAsProvider(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := unleashsdk.NewClient(
-		unleashsdk.WithAppName("test"),
-		unleashsdk.WithUrl(server.URL+"/"),
-		unleashsdk.WithDisableMetrics(true),
-		unleashsdk.WithStrategies(Strategies()...),
-	)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client, err := New(ctx, "test", server.URL+"/", unleashsdk.WithDisableMetrics(true))
 	if err != nil {
-		t.Fatalf("NewClient() error = %v", err)
+		t.Fatalf("New() error = %v", err)
 	}
 	defer func() { _ = client.Close() }()
-	select {
-	case <-client.Ready():
-	case <-time.After(5 * time.Second):
-		t.Fatal("client never became ready")
-	}
 
-	provider := AsProvider(client)
-	if !provider.IsEnabled("org-flag", featureflags.Context{OrgID: "org-a"}) {
+	if !client.IsEnabled("org-flag", featureflags.Context{OrgID: "org-a"}) {
 		t.Error("org-flag disabled for listed org")
 	}
-	if provider.IsEnabled("org-flag", featureflags.Context{OrgID: "org-b"}) {
+	if client.IsEnabled("org-flag", featureflags.Context{OrgID: "org-b"}) {
 		t.Error("org-flag enabled for unlisted org")
 	}
-	if provider.IsEnabled("missing-flag", featureflags.Context{OrgID: "org-a"}) {
+	if client.IsEnabled("missing-flag", featureflags.Context{OrgID: "org-a"}) {
 		t.Error("unknown flag enabled")
+	}
+}
+
+func TestNewTimesOutWhenUnleashIsUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	client, err := New(ctx, "test", server.URL+"/", unleashsdk.WithDisableMetrics(true))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("New() error = %v, want context.DeadlineExceeded", err)
+	}
+	if client != nil {
+		t.Error("New() returned a client on timeout")
 	}
 }
