@@ -2,14 +2,20 @@ package lokerpc
 
 import (
 	"encoding/json"
+	"mime"
+	"net/http"
+	"strconv"
+	"strings"
 
 	v1 "github.com/LOKE/pkg/lokerpc"
+	"github.com/LOKE/pkg/lokerpc/v2/rpcv1"
 	jtd "github.com/jsontypedef/json-typedef-go"
+	"google.golang.org/protobuf/proto"
 )
 
 // MarshalJSON preserves explicit empty property maps in legacy-compatible metadata.
 func (meta Meta) MarshalJSON() ([]byte, error) {
-	if meta.Proto == "" {
+	if !meta.derived {
 		return json.Marshal(meta.Meta)
 	}
 	type endpointJSON struct {
@@ -30,17 +36,55 @@ func (meta Meta) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(struct {
 		v1.Meta
-		Interfaces   []endpointJSON        `json:"interfaces"`
-		Definitions  map[string]schemaJSON `json:"definitions,omitempty"`
-		Proto        string                `json:"proto,omitempty"`
-		ProtoService string                `json:"protoService,omitempty"`
+		Interfaces  []endpointJSON        `json:"interfaces"`
+		Definitions map[string]schemaJSON `json:"definitions,omitempty"`
 	}{
-		Meta:         meta.Meta,
-		Interfaces:   interfaces,
-		Definitions:  schemaMapJSON(meta.Definitions),
-		Proto:        meta.Proto,
-		ProtoService: meta.ProtoService,
+		Meta:        meta.Meta,
+		Interfaces:  interfaces,
+		Definitions: schemaMapJSON(meta.Definitions),
 	})
+}
+
+func serviceMetaHandler(meta any, descriptor *rpcv1.ServiceDescriptor) (http.Handler, error) {
+	jsonHandler, err := metaHandler(meta)
+	if err != nil {
+		return nil, err
+	}
+	var data []byte
+	if descriptor != nil {
+		data, err = (proto.MarshalOptions{Deterministic: true}).Marshal(descriptor)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Vary", "Accept")
+		if r.Method == http.MethodGet && descriptor != nil && acceptsProto(r.Header.Values("Accept")) {
+			w.Header().Set("Content-Type", "application/proto")
+			_, _ = w.Write(data)
+			return
+		}
+		jsonHandler.ServeHTTP(w, r)
+	}), nil
+}
+
+func acceptsProto(headers []string) bool {
+	for _, header := range headers {
+		for _, value := range strings.Split(header, ",") {
+			mediaType, params, err := mime.ParseMediaType(strings.TrimSpace(value))
+			if err != nil || mediaType != "application/proto" {
+				continue
+			}
+			if quality, exists := params["q"]; exists {
+				q, err := strconv.ParseFloat(quality, 64)
+				if err != nil || !(q > 0 && q <= 1) {
+					continue
+				}
+			}
+			return true
+		}
+	}
+	return false
 }
 
 type schemaJSON struct {

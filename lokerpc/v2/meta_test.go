@@ -34,9 +34,7 @@ func TestServiceMetaMarshalsEmptyObjectSchemas(t *testing.T) {
 			RequestTypeDef  json.RawMessage `json:"requestTypeDef"`
 			ResponseTypeDef json.RawMessage `json:"responseTypeDef"`
 		} `json:"interfaces"`
-		Definitions  map[string]json.RawMessage `json:"definitions"`
-		Proto        string                     `json:"proto"`
-		ProtoService string                     `json:"protoService"`
+		Definitions map[string]json.RawMessage `json:"definitions"`
 	}
 	if err := json.Unmarshal(data, &wire); err != nil {
 		t.Fatal(err)
@@ -52,9 +50,6 @@ func TestServiceMetaMarshalsEmptyObjectSchemas(t *testing.T) {
 	}
 	if got := string(wire.Definitions["EmptyMessage"]); got != `{"properties":{},"optionalProperties":{},"additionalProperties":true}` {
 		t.Fatalf("empty message wire schema = %s", got)
-	}
-	if wire.Proto != meta.Proto || wire.ProtoService != "wire.Example" {
-		t.Fatalf("lost proto metadata: %s", data)
 	}
 }
 
@@ -80,7 +75,7 @@ func TestMetaMarshalsNestedEmptyProperties(t *testing.T) {
 				ServiceName: "example", Help: "example service",
 				Interfaces:  []v1.EndpointMeta{{MethodName: "call", RequestTypeDef: &test.schema, ResponseTypeDef: &test.schema}},
 				Definitions: map[string]jtd.Schema{"Test": test.schema},
-			}, Proto: "descriptor"}
+			}, derived: true}
 			data, err := json.Marshal(meta)
 			if err != nil {
 				t.Fatal(err)

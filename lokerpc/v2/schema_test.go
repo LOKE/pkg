@@ -1,7 +1,6 @@
 package lokerpc
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"reflect"
 	"strings"
@@ -85,7 +84,7 @@ func TestServiceMetaSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if meta.ServiceName != "example" || meta.MultiArg || meta.Help != "Example service documentation." || meta.ProtoService != "sample.Example" {
+	if meta.ServiceName != "example" || meta.MultiArg || meta.Help != "Example service documentation." {
 		t.Fatalf("unexpected service metadata: %+v", meta)
 	}
 	if len(meta.Interfaces) != 2 || meta.Interfaces[0].MethodName != "alpha" || meta.Interfaces[1].MethodName != "zulu" {
@@ -120,12 +119,8 @@ func TestServiceMetaSchema(t *testing.T) {
 	if meta.Interfaces[1].ResponseTypeDef.Properties == nil || len(meta.Interfaces[1].ResponseTypeDef.Properties) != 0 {
 		t.Fatal("Empty response must be an empty object")
 	}
-	data, err := base64.StdEncoding.DecodeString(meta.Proto)
+	set, err := descriptorSet(descriptor)
 	if err != nil {
-		t.Fatal(err)
-	}
-	set := &descriptorpb.FileDescriptorSet{}
-	if err := proto.Unmarshal(data, set); err != nil {
 		t.Fatal(err)
 	}
 	paths := make([]string, len(set.File))
@@ -136,9 +131,9 @@ func TestServiceMetaSchema(t *testing.T) {
 	if !reflect.DeepEqual(paths, wantPaths) || !proto.Equal(set.File[3].SourceCodeInfo, protodesc.ToFileDescriptorProto(descriptor).SourceCodeInfo) {
 		t.Fatalf("descriptor closure/source info not preserved: %v", paths)
 	}
-	again, err := serviceMeta("example", descriptor.Services().Get(0))
-	if err != nil || again.Proto != meta.Proto {
-		t.Fatalf("descriptor serialization not deterministic: %v", err)
+	again, err := descriptorSet(descriptor)
+	if err != nil || !proto.Equal(again, set) {
+		t.Fatalf("descriptor closure not deterministic: %v", err)
 	}
 }
 

@@ -77,10 +77,18 @@ if err != nil {
 Here `menu` implements your generated handler interface and `existingV1Service`
 is the original `*lokerpc.Service` named `"menu"`. `NoBridge: true` leaves all
 `POST /rpc/menu/<method>` routes, validation, responses and errors with that v1
-service. Connect clients use the generated service path. `GET /rpc` and
-`GET /rpc/menu` retain the original legacy metadata and add only `proto` and
-`protoService`, so legacy client generation remains unchanged while proto-aware
-clients can generate Connect clients.
+service. Connect clients use the generated service path. `GET /rpc/menu` retains
+the original legacy JSON metadata byte-for-byte. Its entry in `GET /rpc` is also
+unchanged, so legacy client generation remains unchanged.
+
+To discover a proto service, request `GET /rpc/<name>` with
+`Accept: application/proto, application/json;q=0.9`. When `application/proto` is
+explicitly accepted with a positive q-value, proto-backed services return
+`Content-Type: application/proto` and a binary `loke.rpc.v1.ServiceDescriptor`
+containing the fully-qualified service name and its file descriptor set, with
+transitive imports before their dependents. Legacy-only services return JSON.
+Absent Accept, `*/*`, or `application/proto;q=0` returns JSON, and `/rpc` always
+returns JSON. Every service metadata response carries `Vary: Accept`.
 
 Exactly one v1 service and one `NoBridge` proto service may share a name; all
 other duplicate names are mount errors. A `NoBridge` service without a v1 pair
@@ -139,9 +147,10 @@ UTF-16 order; integer-index keys come first in numeric order at every object lev
 `help` is omitted. Without a detail, existing Connect-to-legacy error mapping applies.
 Paired v1 routes are unchanged.
 
-The canonical schema is `lokerpc/v2/proto/loke/rpc/v1/error.proto`. Regenerate its Go
-types with `go generate ./lokerpc/v2` (requires `protoc`); the checked-in plugin wrapper
-uses `go run google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11`.
+The canonical schemas are `lokerpc/v2/proto/loke/rpc/v1/error.proto` and
+`lokerpc/v2/proto/loke/rpc/v1/descriptor.proto`. Regenerate their Go types with
+`go generate ./lokerpc/v2` (requires `protoc`); the checked-in plugin wrapper uses
+`go run google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11`.
 
 ## Licence
 

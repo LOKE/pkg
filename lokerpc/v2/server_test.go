@@ -364,12 +364,6 @@ func TestMergedMetadataAndLegacyDispatch(t *testing.T) {
 			t.Errorf("individual metadata for %q differs from root", meta.ServiceName)
 		}
 	}
-	if root.Services[0].Proto != "" || root.Services[0].ProtoService != "" {
-		t.Error("legacy metadata unexpectedly contains proto fields")
-	}
-	if root.Services[1].Proto == "" || root.Services[1].ProtoService != testpbconnect.FixtureServiceName {
-		t.Errorf("proto metadata = %+v", root.Services[1])
-	}
 	response = serve(t, mux, http.MethodPost, "/rpc/alpha/alpha", "{}")
 	if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != `"legacy response"` {
 		t.Errorf("legacy dispatch = %d %s", response.Code, response.Body.String())
@@ -426,12 +420,11 @@ func TestPairedMetadataAndDispatch(t *testing.T) {
 				}
 				meta = services[1].(map[string]any)
 			}
-			protoMeta := decodeObject(t, serve(t, mountFixture(t, fixtureService("fixture", fixtureHandler{})), http.MethodGet, "/rpc/fixture", ""))
-			for _, field := range []string{"proto", "protoService"} {
-				if meta[field] != protoMeta[field] {
-					t.Errorf("%s differs from proto metadata", field)
+			if path == "/rpc/fixture" {
+				want := serve(t, baseline, http.MethodGet, path, "")
+				if !bytes.Equal(response.Body.Bytes(), want.Body.Bytes()) {
+					t.Errorf("paired JSON differs from v1: got %s, want %s", response.Body.Bytes(), want.Body.Bytes())
 				}
-				delete(meta, field)
 			}
 			want := decodeObject(t, serve(t, baseline, http.MethodGet, "/rpc/fixture", ""))
 			if !reflect.DeepEqual(meta, want) {

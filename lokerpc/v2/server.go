@@ -1,7 +1,7 @@
 // Package lokerpc serves protobuf services through Connect and legacy HTTP RPC.
 package lokerpc
 
-//go:generate protoc -I proto --plugin=protoc-gen-go=./protoc-gen-go.sh --go_out=. --go_opt=module=github.com/LOKE/pkg/lokerpc/v2 --go_opt=Mloke/rpc/v1/error.proto=github.com/LOKE/pkg/lokerpc/v2/rpcv1 proto/loke/rpc/v1/error.proto
+//go:generate protoc -I proto --plugin=protoc-gen-go=./protoc-gen-go.sh --go_out=. --go_opt=module=github.com/LOKE/pkg/lokerpc/v2 --go_opt=Mloke/rpc/v1/error.proto=github.com/LOKE/pkg/lokerpc/v2/rpcv1 --go_opt=Mloke/rpc/v1/descriptor.proto=github.com/LOKE/pkg/lokerpc/v2/rpcv1 proto/loke/rpc/v1/error.proto proto/loke/rpc/v1/descriptor.proto
 
 import (
 	"bytes"
@@ -17,6 +17,7 @@ import (
 
 	"connectrpc.com/connect"
 	v1 "github.com/LOKE/pkg/lokerpc"
+	"github.com/LOKE/pkg/lokerpc/v2/rpcv1"
 	"github.com/LOKE/pkg/requestid"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -26,11 +27,10 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 )
 
-// Meta extends legacy metadata with the service's protobuf descriptors.
+// Meta describes a service using legacy-compatible JTD schemas.
 type Meta struct {
 	v1.Meta
-	Proto        string `json:"proto,omitempty"`
-	ProtoService string `json:"protoService,omitempty"`
+	derived bool
 }
 
 // Service builds a generated Connect handler under a required legacy Name.
@@ -100,11 +100,18 @@ func MountHandlers(logger log.Logger, mux v1.Mux, services []Service, legacy ...
 		}
 		if index, paired := legacyIndexes[service.Name]; paired {
 			meta.Meta = root.Services[index].Meta
+			meta.derived = false
 			root.Services[index] = meta
 		} else {
 			root.Services = append(root.Services, meta)
 		}
-		metadata[i], err = metaHandler(meta)
+		files, err := descriptorSet(descriptors[i].ParentFile())
+		if err != nil {
+			return fmt.Errorf("service %q descriptors: %w", service.Name, err)
+		}
+		metadata[i], err = serviceMetaHandler(meta, &rpcv1.ServiceDescriptor{
+			Service: string(descriptors[i].FullName()), Files: files,
+		})
 		if err != nil {
 			return fmt.Errorf("encode service metadata: %w", err)
 		}
@@ -115,11 +122,9 @@ func MountHandlers(logger log.Logger, mux v1.Mux, services []Service, legacy ...
 		return fmt.Errorf("encode root metadata: %w", err)
 	}
 	for _, service := range legacy {
-		if protoNames[service.Name] {
-			service.MountHandlers(logger, methodMux{Mux: mux, metadataPath: "/rpc/" + service.Name})
-		} else {
-			service.MountHandlers(logger, mux)
-		}
+		service.MountHandlers(logger, methodMux{
+			Mux: mux, metadataPath: "/rpc/" + service.Name, paired: protoNames[service.Name],
+		})
 	}
 	for i, service := range services {
 		mux.Handle(servicePaths[i], handlers[i])
@@ -135,13 +140,22 @@ func MountHandlers(logger log.Logger, mux v1.Mux, services []Service, legacy ...
 type methodMux struct {
 	v1.Mux
 	metadataPath string
+	paired       bool
 }
 
-// Only paired metadata is replaced; v1 retains ownership of its method handlers.
+// v2 owns negotiated metadata; v1 retains ownership of its method handlers.
 func (mux methodMux) Handle(path string, handler http.Handler) {
-	if path != mux.metadataPath {
-		mux.Mux.Handle(path, handler)
+	if path == mux.metadataPath {
+		if mux.paired {
+			return
+		}
+		original := handler
+		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Add("Vary", "Accept")
+			original.ServeHTTP(w, r)
+		})
 	}
+	mux.Mux.Handle(path, handler)
 }
 
 func validateServiceNames(services []Service, legacy []*v1.Service) (map[string]int, map[string]bool, error) {

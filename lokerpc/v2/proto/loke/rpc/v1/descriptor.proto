@@ -1,0 +1,8 @@
+syntax = "proto3";
+package loke.rpc.v1;
+import "google/protobuf/descriptor.proto";
+// ServiceDescriptor is served at GET /rpc/<name> for Accept: application/proto.
+message ServiceDescriptor {
+  string service = 1; // fully-qualified proto service name
+  google.protobuf.FileDescriptorSet files = 2; // service file plus transitive imports, dependencies first
+}

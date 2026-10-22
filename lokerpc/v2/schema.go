@@ -1,7 +1,6 @@
 package lokerpc
 
 import (
-	"encoding/base64"
 	"fmt"
 	"sort"
 	"strings"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/LOKE/pkg/lokerpc"
 	jtd "github.com/jsontypedef/json-typedef-go"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"
@@ -70,13 +68,13 @@ func serviceMeta(name string, descriptor protoreflect.ServiceDescriptor) (Meta, 
 		definitions[names[fullName]] = schema
 	}
 	meta := Meta{
+		derived: true,
 		Meta: lokerpc.Meta{
 			ServiceName: name,
 			Help:        leadingComment(descriptor, name+" service"),
 			Interfaces:  make([]lokerpc.EndpointMeta, 0, methods.Len()),
 			Definitions: definitions,
 		},
-		ProtoService: string(descriptor.FullName()),
 	}
 	methodNames := make(map[string]bool, methods.Len())
 	for i := range methods.Len() {
@@ -105,15 +103,6 @@ func serviceMeta(name string, descriptor protoreflect.ServiceDescriptor) (Meta, 
 		})
 	}
 	sort.Slice(meta.Interfaces, func(i, j int) bool { return meta.Interfaces[i].MethodName < meta.Interfaces[j].MethodName })
-	files, err := descriptorSet(descriptor.ParentFile())
-	if err != nil {
-		return Meta{}, err
-	}
-	data, err := (proto.MarshalOptions{Deterministic: true}).Marshal(files)
-	if err != nil {
-		return Meta{}, fmt.Errorf("encode service descriptors: %w", err)
-	}
-	meta.Proto = base64.StdEncoding.EncodeToString(data)
 	return meta, nil
 }
 
