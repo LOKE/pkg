@@ -25,4 +25,5 @@ message BenchmarkOption {
 service BenchmarkMenuService {
   rpc Encode(google.protobuf.Empty) returns (BenchmarkMenu);
   rpc Decode(BenchmarkMenu) returns (google.protobuf.Empty);
+  rpc Small(BenchmarkOption) returns (BenchmarkOption);
 }

@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v3.21.12
-// source: menu.proto
+// source: lokerpc/v2/internal/testpb/menu.proto
 
 package testpb
 
@@ -32,7 +32,7 @@ type BenchmarkMenu struct {
 
 func (x *BenchmarkMenu) Reset() {
 	*x = BenchmarkMenu{}
-	mi := &file_menu_proto_msgTypes[0]
+	mi := &file_lokerpc_v2_internal_testpb_menu_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -44,7 +44,7 @@ func (x *BenchmarkMenu) String() string {
 func (*BenchmarkMenu) ProtoMessage() {}
 
 func (x *BenchmarkMenu) ProtoReflect() protoreflect.Message {
-	mi := &file_menu_proto_msgTypes[0]
+	mi := &file_lokerpc_v2_internal_testpb_menu_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -57,7 +57,7 @@ func (x *BenchmarkMenu) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BenchmarkMenu.ProtoReflect.Descriptor instead.
 func (*BenchmarkMenu) Descriptor() ([]byte, []int) {
-	return file_menu_proto_rawDescGZIP(), []int{0}
+	return file_lokerpc_v2_internal_testpb_menu_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *BenchmarkMenu) GetProducts() []*BenchmarkProduct {
@@ -82,7 +82,7 @@ type BenchmarkProduct struct {
 
 func (x *BenchmarkProduct) Reset() {
 	*x = BenchmarkProduct{}
-	mi := &file_menu_proto_msgTypes[1]
+	mi := &file_lokerpc_v2_internal_testpb_menu_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -94,7 +94,7 @@ func (x *BenchmarkProduct) String() string {
 func (*BenchmarkProduct) ProtoMessage() {}
 
 func (x *BenchmarkProduct) ProtoReflect() protoreflect.Message {
-	mi := &file_menu_proto_msgTypes[1]
+	mi := &file_lokerpc_v2_internal_testpb_menu_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -107,7 +107,7 @@ func (x *BenchmarkProduct) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BenchmarkProduct.ProtoReflect.Descriptor instead.
 func (*BenchmarkProduct) Descriptor() ([]byte, []int) {
-	return file_menu_proto_rawDescGZIP(), []int{1}
+	return file_lokerpc_v2_internal_testpb_menu_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *BenchmarkProduct) GetId() string {
@@ -170,7 +170,7 @@ type BenchmarkOption struct {
 
 func (x *BenchmarkOption) Reset() {
 	*x = BenchmarkOption{}
-	mi := &file_menu_proto_msgTypes[2]
+	mi := &file_lokerpc_v2_internal_testpb_menu_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -182,7 +182,7 @@ func (x *BenchmarkOption) String() string {
 func (*BenchmarkOption) ProtoMessage() {}
 
 func (x *BenchmarkOption) ProtoReflect() protoreflect.Message {
-	mi := &file_menu_proto_msgTypes[2]
+	mi := &file_lokerpc_v2_internal_testpb_menu_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -195,7 +195,7 @@ func (x *BenchmarkOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BenchmarkOption.ProtoReflect.Descriptor instead.
 func (*BenchmarkOption) Descriptor() ([]byte, []int) {
-	return file_menu_proto_rawDescGZIP(), []int{2}
+	return file_lokerpc_v2_internal_testpb_menu_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *BenchmarkOption) GetId() string {
@@ -219,12 +219,11 @@ func (x *BenchmarkOption) GetPrice() int32 {
 	return 0
 }
 
-var File_menu_proto protoreflect.FileDescriptor
+var File_lokerpc_v2_internal_testpb_menu_proto protoreflect.FileDescriptor
 
-const file_menu_proto_rawDesc = "" +
+const file_lokerpc_v2_internal_testpb_menu_proto_rawDesc = "" +
 	"\n" +
-	"\n" +
-	"menu.proto\x12\x10loke.rpc.test.v2\x1a\x1bgoogle/protobuf/empty.proto\"O\n" +
+	"%lokerpc/v2/internal/testpb/menu.proto\x12\x10loke.rpc.test.v2\x1a\x1bgoogle/protobuf/empty.proto\"O\n" +
 	"\rBenchmarkMenu\x12>\n" +
 	"\bproducts\x18\x01 \x03(\v2\".loke.rpc.test.v2.BenchmarkProductR\bproducts\"\xdd\x01\n" +
 	"\x10BenchmarkProduct\x12\x0e\n" +
@@ -238,64 +237,67 @@ const file_menu_proto_rawDesc = "" +
 	"\x0fBenchmarkOption\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
-	"\x05price\x18\x03 \x01(\x05R\x05price2\x9c\x01\n" +
+	"\x05price\x18\x03 \x01(\x05R\x05price2\xeb\x01\n" +
 	"\x14BenchmarkMenuService\x12A\n" +
 	"\x06Encode\x12\x16.google.protobuf.Empty\x1a\x1f.loke.rpc.test.v2.BenchmarkMenu\x12A\n" +
-	"\x06Decode\x12\x1f.loke.rpc.test.v2.BenchmarkMenu\x1a\x16.google.protobuf.EmptyB0Z.github.com/LOKE/pkg/lokerpc/v2/internal/testpbb\x06proto3"
+	"\x06Decode\x12\x1f.loke.rpc.test.v2.BenchmarkMenu\x1a\x16.google.protobuf.Empty\x12M\n" +
+	"\x05Small\x12!.loke.rpc.test.v2.BenchmarkOption\x1a!.loke.rpc.test.v2.BenchmarkOptionB0Z.github.com/LOKE/pkg/lokerpc/v2/internal/testpbb\x06proto3"
 
 var (
-	file_menu_proto_rawDescOnce sync.Once
-	file_menu_proto_rawDescData []byte
+	file_lokerpc_v2_internal_testpb_menu_proto_rawDescOnce sync.Once
+	file_lokerpc_v2_internal_testpb_menu_proto_rawDescData []byte
 )
 
-func file_menu_proto_rawDescGZIP() []byte {
-	file_menu_proto_rawDescOnce.Do(func() {
-		file_menu_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_menu_proto_rawDesc), len(file_menu_proto_rawDesc)))
+func file_lokerpc_v2_internal_testpb_menu_proto_rawDescGZIP() []byte {
+	file_lokerpc_v2_internal_testpb_menu_proto_rawDescOnce.Do(func() {
+		file_lokerpc_v2_internal_testpb_menu_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_lokerpc_v2_internal_testpb_menu_proto_rawDesc), len(file_lokerpc_v2_internal_testpb_menu_proto_rawDesc)))
 	})
-	return file_menu_proto_rawDescData
+	return file_lokerpc_v2_internal_testpb_menu_proto_rawDescData
 }
 
-var file_menu_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
-var file_menu_proto_goTypes = []any{
+var file_lokerpc_v2_internal_testpb_menu_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_lokerpc_v2_internal_testpb_menu_proto_goTypes = []any{
 	(*BenchmarkMenu)(nil),    // 0: loke.rpc.test.v2.BenchmarkMenu
 	(*BenchmarkProduct)(nil), // 1: loke.rpc.test.v2.BenchmarkProduct
 	(*BenchmarkOption)(nil),  // 2: loke.rpc.test.v2.BenchmarkOption
 	(*emptypb.Empty)(nil),    // 3: google.protobuf.Empty
 }
-var file_menu_proto_depIdxs = []int32{
+var file_lokerpc_v2_internal_testpb_menu_proto_depIdxs = []int32{
 	1, // 0: loke.rpc.test.v2.BenchmarkMenu.products:type_name -> loke.rpc.test.v2.BenchmarkProduct
 	2, // 1: loke.rpc.test.v2.BenchmarkProduct.options:type_name -> loke.rpc.test.v2.BenchmarkOption
 	3, // 2: loke.rpc.test.v2.BenchmarkMenuService.Encode:input_type -> google.protobuf.Empty
 	0, // 3: loke.rpc.test.v2.BenchmarkMenuService.Decode:input_type -> loke.rpc.test.v2.BenchmarkMenu
-	0, // 4: loke.rpc.test.v2.BenchmarkMenuService.Encode:output_type -> loke.rpc.test.v2.BenchmarkMenu
-	3, // 5: loke.rpc.test.v2.BenchmarkMenuService.Decode:output_type -> google.protobuf.Empty
-	4, // [4:6] is the sub-list for method output_type
-	2, // [2:4] is the sub-list for method input_type
+	2, // 4: loke.rpc.test.v2.BenchmarkMenuService.Small:input_type -> loke.rpc.test.v2.BenchmarkOption
+	0, // 5: loke.rpc.test.v2.BenchmarkMenuService.Encode:output_type -> loke.rpc.test.v2.BenchmarkMenu
+	3, // 6: loke.rpc.test.v2.BenchmarkMenuService.Decode:output_type -> google.protobuf.Empty
+	2, // 7: loke.rpc.test.v2.BenchmarkMenuService.Small:output_type -> loke.rpc.test.v2.BenchmarkOption
+	5, // [5:8] is the sub-list for method output_type
+	2, // [2:5] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
 	2, // [2:2] is the sub-list for extension extendee
 	0, // [0:2] is the sub-list for field type_name
 }
 
-func init() { file_menu_proto_init() }
-func file_menu_proto_init() {
-	if File_menu_proto != nil {
+func init() { file_lokerpc_v2_internal_testpb_menu_proto_init() }
+func file_lokerpc_v2_internal_testpb_menu_proto_init() {
+	if File_lokerpc_v2_internal_testpb_menu_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_menu_proto_rawDesc), len(file_menu_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_lokerpc_v2_internal_testpb_menu_proto_rawDesc), len(file_lokerpc_v2_internal_testpb_menu_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_menu_proto_goTypes,
-		DependencyIndexes: file_menu_proto_depIdxs,
-		MessageInfos:      file_menu_proto_msgTypes,
+		GoTypes:           file_lokerpc_v2_internal_testpb_menu_proto_goTypes,
+		DependencyIndexes: file_lokerpc_v2_internal_testpb_menu_proto_depIdxs,
+		MessageInfos:      file_lokerpc_v2_internal_testpb_menu_proto_msgTypes,
 	}.Build()
-	File_menu_proto = out.File
-	file_menu_proto_goTypes = nil
-	file_menu_proto_depIdxs = nil
+	File_lokerpc_v2_internal_testpb_menu_proto = out.File
+	file_lokerpc_v2_internal_testpb_menu_proto_goTypes = nil
+	file_lokerpc_v2_internal_testpb_menu_proto_depIdxs = nil
 }

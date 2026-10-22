@@ -126,6 +126,17 @@ As in the TypeScript bridge, send-size limits apply to the default-filled JSON
 bytes actually returned by the bridge, rather than the smaller native Connect
 JSON representation.
 
+Run `taskset -c 3 go test ./lokerpc/v2 -run '^$' -bench BenchmarkMenuBridgeHTTP -count=9 -v`
+to compare legacy JSON, bridge JSON, native Connect protobuf and native Connect
+JSON. The fixture contains 200 products with eight options each. Server-only
+cases cover large responses, large requests and tiny calls; loopback round trips
+use the real legacy and generated Connect clients, including gzip on and off for
+large responses. Each round times adjacent per-path blocks and reverses their
+order between rounds. Custom `*-ms/op` metrics exclude the other paths.
+The wire-size log counts compressed or uncompressed response payload bytes,
+excluding HTTP headers and framing; legacy gzip uses an outer HTTP wrapper,
+while native Connect negotiates its own compression.
+
 `MountHandlers` builds each proto handler with an automatic standard error-detail
 interceptor; prepend the supplied options before any service-specific handler options.
 The handler factory is called separately for native and bridge codecs. Register
