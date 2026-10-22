@@ -2,6 +2,7 @@ package lokerpc
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -155,4 +156,97 @@ func TestClient_DoRequestSendsDeadline(t *testing.T) {
 	if !got.Equal(deadline) {
 		t.Errorf("X-Request-Deadline = %v, want %v", got, deadline)
 	}
+}
+
+func TestClient_ErrorDetail(t *testing.T) {
+	const cardDeclined = `{"message":"declined","instance":"abc","expose":true,"code":"card_declined","type":"https://example.com/errors/card_declined","paymentIntentId":"pi_123","declineCode":"insufficient_funds","attempts":3}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := cardDeclined
+		if r.URL.Path == "/plain" {
+			body = `{"message":"plain"}`
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		io.WriteString(w, body)
+	}))
+	defer server.Close()
+
+	var intentID, declineCode, wrongType string
+	var attempts int
+
+	tests := []struct {
+		name      string
+		method    string
+		wrap      bool
+		key       string
+		into      any
+		wantFound bool
+		wantErr   bool
+		want      any
+	}{
+		{name: "string field", method: "declined", key: "paymentIntentId", into: &intentID, wantFound: true, want: "pi_123"},
+		{name: "second string field", method: "declined", key: "declineCode", into: &declineCode, wantFound: true, want: "insufficient_funds"},
+		{name: "number field", method: "declined", key: "attempts", into: &attempts, wantFound: true, want: 3},
+		{name: "wrapped error", method: "declined", wrap: true, key: "paymentIntentId", into: &intentID, wantFound: true, want: "pi_123"},
+		{name: "unknown key", method: "declined", key: "nope", into: &wrongType},
+		{name: "known field is not a detail", method: "declined", key: "message", into: &wrongType},
+		{name: "no extra fields", method: "plain", key: "paymentIntentId", into: &wrongType},
+		{name: "type mismatch", method: "declined", key: "attempts", into: &wrongType, wantFound: true, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := NewClient(server.URL).DoRequest(context.Background(), tt.method, nil, nil)
+			if tt.wrap {
+				err = fmt.Errorf("calling upstream: %w", err)
+			}
+
+			found, detailErr := ErrorDetail(err, tt.key, tt.into)
+			if found != tt.wantFound || (detailErr != nil) != tt.wantErr {
+				t.Fatalf("ErrorDetail() = (%v, %v), want found=%v err=%v", found, detailErr, tt.wantFound, tt.wantErr)
+			}
+			if tt.want != nil && !reflect.DeepEqual(reflect.ValueOf(tt.into).Elem().Interface(), tt.want) {
+				t.Errorf("ErrorDetail() decoded %v, want %v", tt.into, tt.want)
+			}
+		})
+	}
+
+	t.Run("non rpc errors", func(t *testing.T) {
+		for _, err := range []error{nil, fmt.Errorf("boom"), errors.NewPublicError("code", "msg")} {
+			found, detailErr := ErrorDetail(err, "paymentIntentId", &intentID)
+			if found || detailErr != nil {
+				t.Errorf("ErrorDetail(%v) = (%v, %v), want (false, nil)", err, found, detailErr)
+			}
+		}
+	})
+
+	t.Run("known fields still decoded", func(t *testing.T) {
+		err := NewClient(server.URL).DoRequest(context.Background(), "declined", nil, nil)
+
+		rpcErr, ok := errors.AsType[*rpcClientError](err)
+		if !ok {
+			t.Fatalf("expected *rpcClientError, got %T", err)
+		}
+		want := rpcClientError{
+			Message:  "declined",
+			Instance: "abc",
+			Expose:   true,
+			Code:     "card_declined",
+			Type:     "https://example.com/errors/card_declined",
+		}
+		got := *rpcErr
+		got.Rest = nil
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("decoded %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("plain error has nil rest", func(t *testing.T) {
+		err := NewClient(server.URL).DoRequest(context.Background(), "plain", nil, nil)
+
+		rpcErr, _ := errors.AsType[*rpcClientError](err)
+		if rpcErr == nil || rpcErr.Rest != nil {
+			t.Errorf("expected nil Rest, got %v", rpcErr)
+		}
+	})
 }
