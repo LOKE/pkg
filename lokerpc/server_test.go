@@ -2,6 +2,7 @@ package lokerpc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -83,6 +84,19 @@ func TestMountHandlers(t *testing.T) {
 				}
 			}, ""),
 			wantBody:   `{"message":"some error","instance":"123","code":"bar","namespace":"foo","type":"https://example.com/errors/foo/bar"}`,
+			wantStatus: 400,
+		},
+		{
+			name: "upstream rpc error forwards extra fields",
+			req:  httptest.NewRequest("POST", "/rpc/service1/basic", strings.NewReader(`{}`)),
+			endpointCoded: MakeStandardEndpointCodec(func(ctx context.Context, req struct{}) (*struct{}, error) {
+				return nil, &rpcClientError{
+					Message: "some error",
+					Code:    "bar",
+					Rest:    map[string]json.RawMessage{"paymentIntentId": json.RawMessage(`"pi_123"`), "attempts": json.RawMessage(`3`)},
+				}
+			}, ""),
+			wantBody:   `{"message":"some error","code":"bar","attempts":3,"paymentIntentId":"pi_123"}`,
 			wantStatus: 400,
 		},
 	}

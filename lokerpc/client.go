@@ -44,8 +44,6 @@ func newClientWithClient(baseURL string, client *http.Client) Client {
 }
 
 // NOTE: Maybe this should be exported, leaving it for now -- Dom
-// Could also make this a map[string]any for passing through arbitrary fields
-// to the upstream caller
 type rpcClientError struct {
 	Message   string `json:"message"`
 	Instance  string `json:"instance,omitempty"`
@@ -53,6 +51,22 @@ type rpcClientError struct {
 	Code      string `json:"code,omitempty"`
 	Namespace string `json:"namespace,omitempty"`
 	Type      string `json:"type,omitempty"`
+
+	Rest map[string]json.RawMessage `json:",embed"`
+}
+
+// ErrorDetail decodes the upstream RPC error field key into v, reporting whether it was present.
+func ErrorDetail(err error, key string, v any) (bool, error) {
+	rpcErr, ok := errors.AsType[*rpcClientError](err)
+	if !ok {
+		return false, nil
+	}
+
+	raw, ok := rpcErr.Rest[key]
+	if !ok {
+		return false, nil
+	}
+	return true, json.Unmarshal(raw, v)
 }
 
 func (e *rpcClientError) ErrorID() string {
