@@ -13,17 +13,19 @@ type Customer struct {
 	NullablePoints *int32 `json:"nullablePoints"`
 	Uid            string `json:"uid"`
 	Age            *int32 `json:"age,omitempty"`
-	Coords         struct {
+	Coords         *struct {
 		Lat float32 `json:"lat"`
 		Lng float32 `json:"lng"`
 	} `json:"coords,omitempty"`
-	Guest        bool             `json:"guest,omitempty"`
-	Name         string           `json:"name,omitempty"`
+	Distance     *float32         `json:"distance,omitempty"`
+	Guest        *bool            `json:"guest,omitempty"`
+	Name         *string          `json:"name,omitempty"`
 	NullableAge  *int32           `json:"nullableAge,omitempty"`
 	NullableTags *[]string        `json:"nullableTags,omitempty"`
 	Scores       map[string]int32 `json:"scores,omitzero"`
 	SeenAt       time.Time        `json:"seenAt,omitzero"`
 	Tags         []string         `json:"tags,omitzero"`
+	Tier         string           `json:"tier,omitempty"`
 }
 
 type DiscountsService interface {

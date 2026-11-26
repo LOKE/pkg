@@ -38,7 +38,7 @@ type goGen struct {
 }
 
 // optionalField renders an optional property's type and its JSON omit option.
-// omitzero needs Go 1.24 in consumers; ints are pointers to detect absence.
+// Pointers distinguish absence from a valid zero value. omitzero needs Go 1.24.
 func optionalField(schema jtd.Schema, name string, g goGen) (goType, omit string) {
 	t := genGoType(schema, name, false, g)
 
@@ -56,15 +56,16 @@ func optionalField(schema jtd.Schema, name string, g goGen) (goType, omit string
 	switch resolved.Form() {
 	case jtd.FormElements, jtd.FormValues:
 		return t, "omitzero"
-	case jtd.FormDiscriminator:
-		// An envelope with no variant set refuses to marshal, and omitempty
-		// never omits a struct.
+	case jtd.FormProperties, jtd.FormDiscriminator:
+		// omitempty never omits a value struct, and a union envelope with no
+		// variant set refuses to marshal.
 		return "*" + t, "omitempty"
 	case jtd.FormType:
 		switch resolved.Type {
 		case jtd.TypeTimestamp:
 			return t, "omitzero"
-		case jtd.TypeInt8, jtd.TypeUint8, jtd.TypeInt16, jtd.TypeUint16, jtd.TypeInt32, jtd.TypeUint32:
+		case jtd.TypeString, jtd.TypeBoolean, jtd.TypeFloat32, jtd.TypeFloat64,
+			jtd.TypeInt8, jtd.TypeUint8, jtd.TypeInt16, jtd.TypeUint16, jtd.TypeInt32, jtd.TypeUint32:
 			return "*" + t, "omitempty"
 		}
 	}

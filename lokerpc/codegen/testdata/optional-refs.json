@@ -9,6 +9,12 @@
     "CreatedAtAlias": { "ref": "CreatedAt" },
     "Tags": { "elements": { "type": "string" } },
     "MaybeCount": { "type": "int32", "nullable": true },
+    "Coords": {
+      "properties": {
+        "lat": { "type": "float64" },
+        "lng": { "type": "float64" }
+      }
+    },
     "CountAlias": { "ref": "Count" },
     "Filter": {
       "optionalProperties": {
@@ -19,6 +25,7 @@
         "createdAt": { "ref": "CreatedAt" },
         "createdAtAlias": { "ref": "CreatedAtAlias" },
         "tags": { "ref": "Tags" },
+        "coords": { "ref": "Coords" },
         "inlineCount": { "type": "int32" }
       }
     }
