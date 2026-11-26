@@ -11,6 +11,7 @@ export type Customer = {
   lat: number;
   lng: number;
 };
+  distance?: number;
   guest?: boolean;
   name?: string;
   nullableAge?: number | null;
@@ -18,6 +19,7 @@ export type Customer = {
   scores?: Record<string, number>;
   seenAt?: string;
   tags?: string[];
+  tier?: "BRONZE" | "SILVER" | "GOLD";
 };
 
 /**

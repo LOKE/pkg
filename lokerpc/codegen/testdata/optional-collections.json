@@ -12,6 +12,8 @@
       },
       "optionalProperties": {
         "guest": { "type": "boolean" },
+        "tier": { "enum": ["BRONZE", "SILVER", "GOLD"] },
+        "distance": { "type": "float32" },
         "name": { "type": "string" },
         "tags": { "elements": { "type": "string" } },
         "scores": { "values": { "type": "int32" } },
